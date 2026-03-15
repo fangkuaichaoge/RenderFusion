@@ -110,12 +110,10 @@ namespace RF {
             // Original: 完全无修改，无黑边，无滤镜
             {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
             // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
-            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            // Cinematic: 电影感色调，默认关闭景深
-            {"Cinematic", {true, 0.02f, 1.1f, 0.95f, -0.06f, 0.15f, false, false, 0.0f, 0.015f, false, 0.3f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
+            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}}
         };
         
-        if (idx >= 0 && idx < 3) {
+        if (idx >= 0 && idx < 2) {
             params = presets[idx].p;
         }
     }
@@ -186,48 +184,47 @@ vec3 rgb2hsv(vec3 c) {
     return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
 
-// 漫画风格黑白 - 基于色调和饱和度的智能判定
+// 漫画风格黑白 - 多层次色调分离
 float mangaGray(vec3 color) {
     vec3 hsv = rgb2hsv(color);
-    float hue = hsv.x;        // 色调 0-1
-    float sat = hsv.y;        // 饱和度 0-1
-    float val = hsv.z;        // 明度 0-1
+    float hue = hsv.x;
+    float sat = hsv.y;
+    float val = hsv.z;
     
-    // 基础灰度
+    // 基础灰度（使用亮度加权）
     float gray = dot(color, vec3(0.299, 0.587, 0.114));
     
-    // 根据色调调整：暖色（红橙黄）稍亮，冷色（蓝紫）稍暗
-    // hue: 0=红, 0.16=黄, 0.33=绿, 0.5=青, 0.66=蓝, 0.83=紫
+    // 根据色调微调：暖色稍亮，冷色稍暗
     float warmth = 0.0;
     if (hue < 0.17) {
-        // 红到黄：暖色，提亮
-        warmth = 0.15 * (1.0 - abs(hue - 0.08) / 0.08);
+        warmth = 0.08 * (1.0 - abs(hue - 0.08) / 0.08);
     } else if (hue > 0.58 && hue < 0.75) {
-        // 蓝到青：冷色，压暗
-        warmth = -0.1 * (1.0 - abs(hue - 0.66) / 0.08);
-    } else if (hue > 0.8) {
-        // 紫色：中性偏暗
-        warmth = -0.05;
+        warmth = -0.06 * (1.0 - abs(hue - 0.66) / 0.08);
     }
+    gray = gray + warmth;
     
-    // 高饱和度区域：增强对比，让颜色更分明
-    // 低饱和度区域：保持原样
-    float satBoost = sat * 0.1;
+    // 高对比度增强
+    gray = (gray - 0.5) * 1.5 + 0.5;
     
-    // 综合灰度值
-    gray = gray + warmth + satBoost;
+    // 5 阶色调分离：黑、深灰、灰、浅灰、白
+    // 这样可以保留更多层次细节
+    float levels = 5.0;
+    gray = floor(gray * (levels - 1.0) + 0.5) / (levels - 1.0);
     
-    // 高对比度处理
-    gray = (gray - 0.5) * 1.6 + 0.5;
+    // 映射到漫画风格的灰度值
+    // 0.0 → 纯黑 (暗部)
+    // 0.25 → 深灰 (较深的阴影)
+    // 0.5 → 中灰 (中间调)
+    // 0.75 → 浅灰 (较亮的区域)
+    // 1.0 → 纯白 (高光)
+    float mangaLevels[5] = float[](0.0, 0.2, 0.45, 0.75, 1.0);
+    int levelIdx = int(clamp(round(gray * 4.0), 0.0, 4.0));
+    gray = mangaLevels[levelIdx];
     
-    // 色调分离 - 4色阶更细腻的漫画效果
-    float levels = 4.0;
-    gray = floor(gray * levels + 0.5) / levels;
+    // 最终平滑处理，保留边缘锐利
+    gray = clamp(gray, 0.0, 1.0);
     
-    // 最终平滑处理
-    gray = smoothstep(0.15, 0.85, gray);
-    
-    return clamp(gray, 0.0, 1.0);
+    return gray;
 }
 
 void main() {
@@ -974,8 +971,8 @@ static void DrawUI() {
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 0));
     
-    const char* preset_names[] = {"Original", "Manga B&W", "Cinematic"};
-    for (int i = 0; i < 3; i++) {
+    const char* preset_names[] = {"Original", "Manga B&W"};
+    for (int i = 0; i < 2; i++) {
         bool is_selected = (RF::current_preset == i);
         if (is_selected) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
@@ -985,13 +982,13 @@ static void DrawUI() {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.70f, 0.75f, 1.0f));
         }
         
-        if (ImGui::Button(preset_names[i], ImVec2(138, 36))) {
+        if (ImGui::Button(preset_names[i], ImVec2(210, 36))) {
             RF::current_preset = i;
             RF::ApplyPreset(i);
         }
         
         ImGui::PopStyleColor(2);
-        if (i < 2) ImGui::SameLine();
+        if (i < 1) ImGui::SameLine();
     }
     ImGui::PopStyleVar(2);
     
