@@ -15,7 +15,7 @@ jobs:
       - uses: nttld/setup-ndk@v1
         id: ndk
         with:
-          ndk-version: r23b # 关键修改：从 r25c 降回 r23b，适配 libGlossHook.a
+          ndk-version: r26b # 升级到 r26b，匹配新的 ABI 标记
 
       - name: Build
         run: |
