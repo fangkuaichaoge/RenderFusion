@@ -184,47 +184,48 @@ vec3 rgb2hsv(vec3 c) {
     return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
 
-// 漫画风格黑白 - 多层次色调分离
+// 漫画风格黑白 - 基于色调和饱和度的智能判定
 float mangaGray(vec3 color) {
     vec3 hsv = rgb2hsv(color);
-    float hue = hsv.x;
-    float sat = hsv.y;
-    float val = hsv.z;
+    float hue = hsv.x;        // 色调 0-1
+    float sat = hsv.y;        // 饱和度 0-1
+    float val = hsv.z;        // 明度 0-1
     
-    // 基础灰度（使用亮度加权）
+    // 基础灰度
     float gray = dot(color, vec3(0.299, 0.587, 0.114));
     
-    // 根据色调微调：暖色稍亮，冷色稍暗
+    // 根据色调调整：暖色（红橙黄）稍亮，冷色（蓝紫）稍暗
+    // hue: 0=红, 0.16=黄, 0.33=绿, 0.5=青, 0.66=蓝, 0.83=紫
     float warmth = 0.0;
     if (hue < 0.17) {
-        warmth = 0.08 * (1.0 - abs(hue - 0.08) / 0.08);
+        // 红到黄：暖色，提亮
+        warmth = 0.15 * (1.0 - abs(hue - 0.08) / 0.08);
     } else if (hue > 0.58 && hue < 0.75) {
-        warmth = -0.06 * (1.0 - abs(hue - 0.66) / 0.08);
+        // 蓝到青：冷色，压暗
+        warmth = -0.1 * (1.0 - abs(hue - 0.66) / 0.08);
+    } else if (hue > 0.8) {
+        // 紫色：中性偏暗
+        warmth = -0.05;
     }
-    gray = gray + warmth;
     
-    // 高对比度增强
-    gray = (gray - 0.5) * 1.5 + 0.5;
+    // 高饱和度区域：增强对比，让颜色更分明
+    // 低饱和度区域：保持原样
+    float satBoost = sat * 0.1;
     
-    // 5 阶色调分离：黑、深灰、灰、浅灰、白
-    // 这样可以保留更多层次细节
-    float levels = 5.0;
-    gray = floor(gray * (levels - 1.0) + 0.5) / (levels - 1.0);
+    // 综合灰度值
+    gray = gray + warmth + satBoost;
     
-    // 映射到漫画风格的灰度值
-    // 0.0 → 纯黑 (暗部)
-    // 0.25 → 深灰 (较深的阴影)
-    // 0.5 → 中灰 (中间调)
-    // 0.75 → 浅灰 (较亮的区域)
-    // 1.0 → 纯白 (高光)
-    float mangaLevels[5] = float[](0.0, 0.2, 0.45, 0.75, 1.0);
-    int levelIdx = int(clamp(round(gray * 4.0), 0.0, 4.0));
-    gray = mangaLevels[levelIdx];
+    // 高对比度处理
+    gray = (gray - 0.5) * 1.6 + 0.5;
     
-    // 最终平滑处理，保留边缘锐利
-    gray = clamp(gray, 0.0, 1.0);
+    // 色调分离 - 4色阶更细腻的漫画效果
+    float levels = 4.0;
+    gray = floor(gray * levels + 0.5) / levels;
     
-    return gray;
+    // 最终平滑处理
+    gray = smoothstep(0.15, 0.85, gray);
+    
+    return clamp(gray, 0.0, 1.0);
 }
 
 void main() {
