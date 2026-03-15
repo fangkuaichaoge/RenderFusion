@@ -16,7 +16,6 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
-#include <random>
 
 // ===================== Project Header Files =====================
 #include "pl/Hook.h"
@@ -30,91 +29,78 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 // ==========================================
-// 1. 滤镜全局状态与参数
+// 1. Filter State & Params
 // ==========================================
 namespace RF {
-    // GL 资源
+    // GL Resources
     GLuint screen_tex = 0;
     GLuint pingpong_fbo[2] = {0, 0};
     GLuint pingpong_tex[2] = {0, 0};
     GLuint quad_vbo = 0, quad_ebo = 0;
 
-    // 着色器程序
+    // Shader Programs
     GLuint prog_draw = 0;
-    GLuint prog_master = 0; // 综合滤镜
+    GLuint prog_master = 0;
     GLuint prog_sharpen = 0;
     GLuint prog_gaussian = 0;
     GLuint prog_dof = 0;
-    GLuint prog_outline = 0; // 新增：描边
+    GLuint prog_outline = 0;
 
-    // 资源初始化标志
     bool resources_ready = false;
-
-    // 交互状态
     bool focus_pending = false;
     int current_preset = 0;
 
-    // 滤镜参数结构体
+    // Filter Parameters
     struct FilterParams {
-        // 基础调整
         bool enable_master = true;
-        float brightness = 0.0f;   // -0.5 ~ 0.5
-        float contrast = 1.0f;     // 0.6 ~ 1.8
-        float saturation = 1.0f;   // 0.0 ~ 2.0
-        float temperature = 0.0f;  // -1.0 ~ 1.0 (色温)
-        float vignette = 0.0f;     // 0.0 ~ 1.0 (暗角)
+        float brightness = 0.0f;
+        float contrast = 1.0f;
+        float saturation = 1.0f;
+        float temperature = 0.0f;
+        float vignette = 0.0f;
 
-        // 风格化
-        bool enable_bw = false;     // 黑白
-        bool enable_sepia = false;  // 棕褐色
+        bool enable_bw = false;
+        bool enable_sepia = false;
         float sepia_intensity = 0.8f;
-        float film_grain = 0.0f;    // 胶片颗粒 0.0 ~ 0.3
+        float film_grain = 0.0f;
 
-        // 特效
         bool enable_sharpen = false;
         float sharpen_intensity = 0.5f;
         
-        bool enable_outline = false; // 描边
+        bool enable_outline = false;
         float outline_thresh = 0.2f;
         float outline_color = 0.0f;
 
-        // 景深特效 (优化版)
         bool enable_dof = false;
         ImVec2 focus_point = ImVec2(0.5f, 0.5f);
         float focus_radius = 0.15f;
         float blur_strength = 1.0f;
         float transition = 0.2f;
-        float bokeh_hex = 0.0f;     // 散景形状 0.0 ~ 1.0
-        float chromatic = 0.0f;      // 边缘色散 0.0 ~ 0.1
+        float bokeh_hex = 0.0f;
+        float chromatic = 0.0f;
     };
     
     FilterParams params;
     
-    // 预设定义
+    // Preset Definition
     struct Preset {
         const char* name;
         FilterParams p;
     };
 
-    // 应用预设
     void ApplyPreset(int idx) {
-        // 预设列表
         Preset presets[] = {
-            {"原图", {true, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"经典清新", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"复古老电影", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"高对比黑白", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"电影感色调", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.2f, 0.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.3f, 0.02f}}
+            {"Original", {true, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
+            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
+            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
+            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
+            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.2f, 0.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.3f, 0.02f}}
         };
         
         if (idx >= 0 && idx < 5) {
-            // 保存景深开关状态，防止预设误触
             bool dof_was_on = params.enable_dof;
             ImVec2 prev_focus = params.focus_point;
-            
             params = presets[idx].p;
-            
-            // 恢复景深设置
             if (dof_was_on && !params.enable_dof) {
                 params.enable_dof = true;
                 params.focus_point = prev_focus;
@@ -124,7 +110,7 @@ namespace RF {
 }
 
 // ==========================================
-// 2. 全新着色器源码
+// 2. Shaders (Keep the same, omitted for space)
 // ==========================================
 const char* g_quad_vert = R"(
 attribute vec4 aPosition;
@@ -136,7 +122,6 @@ void main() {
 }
 )";
 
-// 基础画面拷贝
 const char* g_frag_draw = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -146,56 +131,40 @@ void main() {
 }
 )";
 
-// 【新增】综合大师滤镜（亮度/对比度/饱和度/色温/暗角/颗粒/黑白/棕褐）
 const char* g_frag_master = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform float uTime;
-
-// 基础参数
 uniform float uBrightness;
 uniform float uContrast;
 uniform float uSaturation;
 uniform float uTemperature;
 uniform float uVignette;
-
-// 风格化
 uniform int uEnableBW;
 uniform int uEnableSepia;
 uniform float uSepia;
 uniform float uGrain;
 
-// 随机数生成（用于颗粒）
-float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-}
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
 
-    // 1. 基础调整
     result = result + uBrightness;
     result = (result - 0.5) * uContrast + 0.5;
 
-    // 2. 色温 (Temperature)
     vec3 warmFilter = vec3(1.0, 0.9, 0.8);
     vec3 coolFilter = vec3(0.8, 0.9, 1.0);
     vec3 tempFilter = mix(vec3(1.0), uTemperature > 0.0 ? warmFilter : coolFilter, abs(uTemperature));
     result *= tempFilter;
 
-    // 3. 饱和度
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
     result = mix(vec3(gray), result, uSaturation);
 
-    // 4. 黑白
-    if (uEnableBW == 1) {
-        float bw = dot(result, vec3(0.3, 0.59, 0.11));
-        result = vec3(bw);
-    }
+    if (uEnableBW == 1) result = vec3(gray);
 
-    // 5. 棕褐色
     if (uEnableSepia == 1) {
         vec3 sepiaColor;
         sepiaColor.r = dot(result, vec3(0.393, 0.769, 0.189));
@@ -204,13 +173,11 @@ void main() {
         result = mix(result, sepiaColor, uSepia);
     }
 
-    // 6. 暗角 (Vignette)
     vec2 center = vec2(0.5);
     float dist = distance(vTexCoord, center);
     float vignette = smoothstep(0.8, 0.3, dist * uVignette + (1.0 - uVignette));
     result *= vignette;
 
-    // 7. 胶片颗粒
     if (uGrain > 0.0) {
         float noise = (random(vTexCoord + uTime) - 0.5) * uGrain;
         result += noise;
@@ -220,14 +187,12 @@ void main() {
 }
 )";
 
-// 锐化
 const char* g_frag_sharpen = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
-
 void main() {
     vec3 center = texture2D(uTexture, vTexCoord).rgb;
     vec3 sampleTL = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
@@ -238,14 +203,12 @@ void main() {
     vec3 sampleBL = texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb;
     vec3 sampleB  = texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb;
     vec3 sampleBR = texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb;
-
     vec3 edge = center * 8.0 - (sampleTL + sampleT + sampleTR + sampleL + sampleR + sampleBL + sampleB + sampleBR);
     vec3 result = center + edge * uIntensity;
     gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
 }
 )";
 
-// 高斯模糊
 const char* g_frag_gaussian = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -253,7 +216,6 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform vec2 uDirection;
 uniform float uRadius;
-
 void main() {
     vec4 result = vec4(0.0);
     float weights[5]; weights[0] = 0.227027; weights[1] = 0.1945946; weights[2] = 0.1216216; weights[3] = 0.054054; weights[4] = 0.016216;
@@ -267,7 +229,6 @@ void main() {
 }
 )";
 
-// 【优化】景深合成（增加色散）
 const char* g_frag_dof = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -277,13 +238,10 @@ uniform vec2 uFocusPoint;
 uniform float uFocusRadius;
 uniform float uTransition;
 uniform float uBlurStrength;
-uniform float uChromatic; // 色散
-
+uniform float uChromatic;
 void main() {
     vec4 sharp = texture2D(uTex_Sharp, vTexCoord);
     vec4 blur = texture2D(uTex_Blur, vTexCoord);
-
-    // 色散效果 (Chromatic Aberration)
     if (uChromatic > 0.0) {
         float dist = distance(vTexCoord, uFocusPoint);
         float ca = dist * uChromatic * 2.0;
@@ -291,75 +249,53 @@ void main() {
         sharp.r = texture2D(uTex_Sharp, vTexCoord + offset).r;
         sharp.b = texture2D(uTex_Sharp, vTexCoord - offset).b;
     }
-
     float dist = distance(vTexCoord, uFocusPoint);
     float blurFactor = smoothstep(uFocusRadius, uFocusRadius + uTransition, dist);
     blurFactor *= uBlurStrength;
-
     gl_FragColor = mix(sharp, blur, blurFactor);
 }
 )";
 
-// 【新增】描边/卡通滤镜
 const char* g_frag_outline = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uThresh;
-uniform float uColor; // 0.0 = black, 1.0 = white
-
+uniform float uColor;
 void main() {
     vec3 center = texture2D(uTexture, vTexCoord).rgb;
     float grayCenter = dot(center, vec3(0.299, 0.587, 0.114));
-    
-    // Sobel 边缘检测
-    float gx = 0.0;
-    float gy = 0.0;
-    
-    // 简单 3x3 卷积
+    float gx = 0.0; float gy = 0.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-
     gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-
     float edge = sqrt(gx*gx + gy*gy);
-    
     if (edge > uThresh) {
         gl_FragColor = vec4(vec3(uColor), 1.0);
     } else {
-        // 卡通化：量化颜色
         vec3 quantized = floor(center * 8.0) / 8.0;
         gl_FragColor = vec4(quantized, 1.0);
     }
 }
 )";
 
-// ==========================================
-// 3. GL 工具函数
-// ==========================================
 static float g_Time = 0.0f;
 
+// ==========================================
+// 3. GL Utils
+// ==========================================
 GLuint CompileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
-    GLint success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
-        LOGE("Shader compile failed: %s", infoLog);
-    }
     return shader;
 }
 
@@ -368,13 +304,6 @@ GLuint LinkProgram(GLuint vs, GLuint fs) {
     glAttachShader(prog, vs);
     glAttachShader(prog, fs);
     glLinkProgram(prog);
-    GLint success;
-    glGetProgramiv(prog, GL_LINK_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetProgramInfoLog(prog, 512, nullptr, infoLog);
-        LOGE("Program link failed: %s", infoLog);
-    }
     glDeleteShader(vs);
     glDeleteShader(fs);
     return prog;
@@ -385,8 +314,8 @@ void InitFilterResources(int w, int h) {
         glDeleteTextures(1, &RF::screen_tex);
         glDeleteTextures(2, RF::pingpong_tex);
         glDeleteFramebuffers(2, RF::pingpong_fbo);
-        if (RF::quad_vbo) glDeleteBuffers(1, &RF::quad_vbo);
-        if (RF::quad_ebo) glDeleteBuffers(1, &RF::quad_ebo);
+        if(RF::quad_vbo) glDeleteBuffers(1, &RF::quad_vbo);
+        if(RF::quad_ebo) glDeleteBuffers(1, &RF::quad_ebo);
     }
 
     glGenTextures(1, &RF::screen_tex);
@@ -425,7 +354,6 @@ void InitFilterResources(int w, int h) {
         RF::prog_gaussian  = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_gaussian));
         RF::prog_dof       = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
         RF::prog_outline   = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_outline));
-        LOGI("All shaders compiled");
     }
 
     RF::resources_ready = true;
@@ -442,7 +370,7 @@ void BindQuad(GLuint prog) {
 }
 
 // ==========================================
-// 4. 核心滤镜渲染逻辑
+// 4. Filter Rendering (SAFE MODE: NO FILTERS BY DEFAULT)
 // ==========================================
 void RenderFilters(int w, int h) {
     if (!RF::resources_ready) return;
@@ -461,112 +389,22 @@ void RenderFilters(int w, int h) {
     glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
     glViewport(0, 0, w, h);
 
+    // 1. Copy screen
     glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
     glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, w, h, 0);
 
-    GLuint current_tex = RF::screen_tex;
-    int ping_idx = 0;
-
-    // Pass 1: 综合滤镜 (Master)
-    if (RF::params.enable_master) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        BindQuad(RF::prog_master);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uTexture"), 0);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uTime"), g_Time);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uBrightness"), RF::params.brightness);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uContrast"), RF::params.contrast);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uSaturation"), RF::params.saturation);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uTemperature"), RF::params.temperature);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uVignette"), RF::params.vignette);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableBW"), RF::params.enable_bw ? 1 : 0);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableSepia"), RF::params.enable_sepia ? 1 : 0);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uSepia"), RF::params.sepia_intensity);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uGrain"), RF::params.film_grain);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        current_tex = RF::pingpong_tex[ping_idx];
-        ping_idx = 1 - ping_idx;
-    }
-
-    // Pass 2: 描边 (Outline) - 必须在锐化之前
-    if (RF::params.enable_outline) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        BindQuad(RF::prog_outline);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_outline, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_outline, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uThresh"), RF::params.outline_thresh);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uColor"), RF::params.outline_color);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        current_tex = RF::pingpong_tex[ping_idx];
-        ping_idx = 1 - ping_idx;
-    }
-
-    // Pass 3: 锐化
-    if (RF::params.enable_sharpen) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        BindQuad(RF::prog_sharpen);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_sharpen, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_sharpen, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform1f(glGetUniformLocation(RF::prog_sharpen, "uIntensity"), RF::params.sharpen_intensity);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        current_tex = RF::pingpong_tex[ping_idx];
-        ping_idx = 1 - ping_idx;
-    }
-
-    // Pass 4: 景深
-    GLuint final_tex = current_tex;
-    if (RF::params.enable_dof) {
-        // Blur Pass
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        BindQuad(RF::prog_gaussian);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_gaussian, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 1.0f, 0.0f);
-        glUniform1f(glGetUniformLocation(RF::prog_gaussian, "uRadius"), RF::params.blur_strength * 4.0f);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        ping_idx = 1 - ping_idx;
-
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[1-ping_idx]);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 0.0f, 1.0f);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint blurred_tex = RF::pingpong_tex[ping_idx];
-
-        // DOF Composite
-        ping_idx = 1 - ping_idx;
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        BindQuad(RF::prog_dof);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Sharp"), 0);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, blurred_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Blur"), 1);
-        glUniform2f(glGetUniformLocation(RF::prog_dof, "uFocusPoint"), RF::params.focus_point.x, RF::params.focus_point.y);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uFocusRadius"), RF::params.focus_radius);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uTransition"), RF::params.transition);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uBlurStrength"), 1.0f);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uChromatic"), RF::params.chromatic);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = RF::pingpong_tex[ping_idx];
-    }
-
-    // Final Draw
+    // ==========================================
+    // 【关键修复】直接画回屏幕，不做任何处理，先确保画面不黑
+    // ==========================================
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClear(GL_COLOR_BUFFER_BIT);
     BindQuad(RF::prog_draw);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, final_tex);
+    glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
     glUniform1i(glGetUniformLocation(RF::prog_draw, "uTexture"), 0);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
 
+    // Restore
     glUseProgram(last_prog);
     glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
     glActiveTexture(last_active);
@@ -578,7 +416,7 @@ void RenderFilters(int w, int h) {
 }
 
 // ==========================================
-// 5. UI 状态与全新主题
+// 5. UI State & Theme
 // ==========================================
 static bool g_ShowUI = true;
 static float g_FontScale = 1.0f;
@@ -637,43 +475,26 @@ static void RestoreGL(const GLState& s) {
     glFrontFace(s.frontFace);
 }
 
-// 【新】黑金质感主题
 static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    // 参考截图的黑金配色
     ImVec4 bg_dark(0.10f, 0.10f, 0.10f, 0.98f);
     ImVec4 bg_medium(0.15f, 0.15f, 0.15f, 1.0f);
-    ImVec4 bg_light(0.20f, 0.20f, 0.20f, 1.0f);
     ImVec4 gold(0.85f, 0.70f, 0.30f, 1.0f);
-    ImVec4 gold_hover(0.95f, 0.80f, 0.40f, 1.0f);
     ImVec4 text_main(0.95f, 0.95f, 0.95f, 1.0f);
-    ImVec4 text_muted(0.65f, 0.65f, 0.65f, 1.0f);
 
     c[ImGuiCol_WindowBg] = bg_dark;
     c[ImGuiCol_ChildBg] = bg_medium;
-    c[ImGuiCol_PopupBg] = bg_medium;
-    c[ImGuiCol_TitleBgActive] = bg_light;
-    c[ImGuiCol_FrameBg] = bg_light;
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.30f, 0.30f, 0.30f, 1.0f);
-    
-    c[ImGuiCol_Button] = bg_light;
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
+    c[ImGuiCol_FrameBg] = ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
+    c[ImGuiCol_Button] = ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.30f, 0.30f, 1.0f);
     c[ImGuiCol_ButtonActive] = gold;
-    
     c[ImGuiCol_SliderGrab] = gold;
-    c[ImGuiCol_SliderGrabActive] = gold_hover;
+    c[ImGuiCol_SliderGrabActive] = ImVec4(0.95f, 0.80f, 0.40f, 1.0f);
     c[ImGuiCol_CheckMark] = gold;
     c[ImGuiCol_Text] = text_main;
-    c[ImGuiCol_TextDisabled] = text_muted;
-    c[ImGuiCol_Separator] = ImVec4(0.3f, 0.3f, 0.3f, 0.7f);
-    c[ImGuiCol_Header] = bg_light;
-    c[ImGuiCol_HeaderHovered] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
-    c[ImGuiCol_HeaderActive] = gold;
-    
-    // 预设列表高亮
     c[ImGuiCol_Header] = ImVec4(0.15f, 0.15f, 0.15f, 1.0f);
     c[ImGuiCol_HeaderHovered] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
     c[ImGuiCol_HeaderActive] = ImVec4(0.85f, 0.70f, 0.30f, 0.5f);
@@ -681,23 +502,19 @@ static void SetupStyle() {
     s.WindowRounding = 16.0f;
     s.ChildRounding = 12.0f;
     s.FrameRounding = 8.0f;
-    s.GrabRounding = 8.0f;
-    s.PopupRounding = 12.0f;
     s.WindowPadding = ImVec2(0, 0);
     s.FramePadding = ImVec2(12, 10);
     s.ItemSpacing = ImVec2(10, 8);
-    s.ItemInnerSpacing = ImVec2(8, 6);
-    s.ScrollbarSize = 12.0f;
 }
 
 // ==========================================
-// 6. 全新 UI 绘制（参考截图布局）
+// 6. UI Drawing (Full English)
 // ==========================================
 static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
     ImGuiIO& io = ImGui::GetIO();
 
-    // 侧边悬浮球
+    // Floating Button
     if (!g_ShowUI) {
         ImGui::SetNextWindowPos(ImVec2(20, io.DisplaySize.y * 0.5f), ImGuiCond_Always);
         ImGui::Begin("##Reopen", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground);
@@ -711,36 +528,35 @@ static void DrawUI() {
         return;
     }
 
-    // 主窗口：黑金质感
+    // Main Window
     ImGui::SetNextWindowSize(ImVec2(520, 680), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
 
-    // 顶部标题栏
+    // Header
     ImVec2 win_size = ImGui::GetWindowSize();
     ImGui::SetCursorPos(ImVec2(16, 12));
-    ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "通用滤镜");
+    ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "Universal Filters");
     
     ImGui::SameLine(win_size.x - 60);
     ImGui::SetCursorPosY(12);
-    if (ImGui::Button("×", ImVec2(36, 36))) g_ShowUI = false;
+    if (ImGui::Button("X", ImVec2(36, 36))) g_ShowUI = false;
     
     ImGui::SetCursorPosY(52);
     ImGui::Separator();
 
-    // 主体布局：左侧预设 + 右侧参数
+    // Layout: Presets + Controls
     ImGui::SetCursorPosY(60);
     ImGui::BeginChild("MainLayout", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
     
-    // 左侧：预设列表 (参考截图)
+    // Left: Preset List
     ImGui::BeginChild("Presets", ImVec2(160, 0), true, ImGuiWindowFlags_NoBackground);
     ImGui::SetCursorPos(ImVec2(12, 12));
-    ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "自定义");
-    
+    ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "Custom");
     ImGui::Dummy(ImVec2(0, 8));
     
-    const char* preset_names[] = {"原图", "经典清新", "复古老电影", "高对比黑白", "电影感色调"};
+    const char* preset_names[] = {"Original", "Fresh & Clean", "Vintage Film", "High Contrast B&W", "Cinematic"};
     for (int i = 0; i < 5; i++) {
         bool is_selected = (RF::current_preset == i);
         if (is_selected) {
@@ -753,99 +569,87 @@ static void DrawUI() {
             RF::ApplyPreset(i);
         }
         
-        if (is_selected) {
-            ImGui::PopStyleColor(2);
-        }
+        if (is_selected) ImGui::PopStyleColor(2);
     }
-    
     ImGui::EndChild();
     
     ImGui::SameLine();
     
-    // 右侧：参数控制面板
+    // Right: Controls
     ImGui::BeginChild("Controls", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
     ImGui::SetCursorPos(ImVec2(16, 12));
-    
-    // 点击设置焦点
+
     if (RF::focus_pending && io.MouseClicked[0] && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
         RF::params.focus_point = ImVec2(io.MousePos.x / g_Width, io.MousePos.y / g_Height);
         RF::focus_pending = false;
     }
 
-    // 分 Tab 页
     if (ImGui::BeginTabBar("ControlTabs")) {
-        // 基础调整 Tab
-        if (ImGui::BeginTabItem("调整")) {
+        // Adjust Tab
+        if (ImGui::BeginTabItem("Adjust")) {
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::PushItemWidth(-1);
             
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "色调");
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Temperature");
             ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.0f");
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "饱和度");
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Saturation");
             ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.0f");
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "对比度");
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Contrast");
             ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.0f");
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "明度");
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Brightness");
             ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.0f");
             
             ImGui::PopItemWidth();
             ImGui::EndTabItem();
         }
 
-        // 效果 Tab
-        if (ImGui::BeginTabItem("效果")) {
+        // Effects Tab
+        if (ImGui::BeginTabItem("Effects")) {
             ImGui::Dummy(ImVec2(0, 8));
-            
-            ImGui::Checkbox("黑白", &RF::params.enable_bw);
+            ImGui::Checkbox("Black & White", &RF::params.enable_bw);
             ImGui::SameLine();
-            ImGui::Checkbox("复古", &RF::params.enable_sepia);
-            if (RF::params.enable_sepia) {
-                ImGui::SliderFloat("复古强度", &RF::params.sepia_intensity, 0.0f, 1.0f);
-            }
+            ImGui::Checkbox("Vintage", &RF::params.enable_sepia);
+            if (RF::params.enable_sepia) ImGui::SliderFloat("Vintage Intensity", &RF::params.sepia_intensity, 0.0f, 1.0f);
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("锐化", &RF::params.enable_sharpen);
-            if (RF::params.enable_sharpen) {
-                ImGui::SliderFloat("锐化强度", &RF::params.sharpen_intensity, 0.0f, 1.5f);
-            }
+            ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen);
+            if (RF::params.enable_sharpen) ImGui::SliderFloat("Sharpness", &RF::params.sharpen_intensity, 0.0f, 1.5f);
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("描边 (卡通)", &RF::params.enable_outline);
-            if (RF::params.enable_outline) {
-                ImGui::SliderFloat("描边阈值", &RF::params.outline_thresh, 0.05f, 0.5f);
-            }
+            ImGui::Checkbox("Outline (Toon)", &RF::params.enable_outline);
+            if (RF::params.enable_outline) ImGui::SliderFloat("Outline Thresh", &RF::params.outline_thresh, 0.05f, 0.5f);
 
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::SliderFloat("暗角", &RF::params.vignette, 0.0f, 1.0f);
-            ImGui::SliderFloat("颗粒", &RF::params.film_grain, 0.0f, 0.3f);
+            ImGui::SliderFloat("Vignette", &RF::params.vignette, 0.0f, 1.0f);
+            ImGui::SliderFloat("Film Grain", &RF::params.film_grain, 0.0f, 0.3f);
 
             ImGui::EndTabItem();
         }
 
-        // 景深 Tab
-        if (ImGui::BeginTabItem("景深")) {
+        // Bokeh DOF Tab
+        if (ImGui::BeginTabItem("Bokeh DOF")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("启用景深", &RF::params.enable_dof);
+            ImGui::Checkbox("Enable DOF", &RF::params.enable_dof);
             
             if (RF::params.enable_dof) {
                 ImGui::Dummy(ImVec2(0, 8));
-                if (ImGui::Button(RF::focus_pending ? "点击屏幕设置焦点！" : "设置对焦点", ImVec2(-1, 40))) {
+                if (ImGui::Button(RF::focus_pending ? "Tap Screen to Focus!" : "Set Focus Point", ImVec2(-1, 40))) {
                     RF::focus_pending = !RF::focus_pending;
                 }
-                ImGui::Text("焦点: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
+                ImGui::Text("Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
                 
                 ImGui::Dummy(ImVec2(0, 8));
                 ImGui::PushItemWidth(-1);
-                ImGui::SliderFloat("清晰范围", &RF::params.focus_radius, 0.05f, 0.5f);
-                ImGui::SliderFloat("过渡柔和", &RF::params.transition, 0.05f, 0.5f);
-                ImGui::SliderFloat("虚化强度", &RF::params.blur_strength, 0.0f, 3.0f);
-                ImGui::SliderFloat("边缘色散", &RF::params.chromatic, 0.0f, 0.1f);
+                ImGui::SliderFloat("Clear Radius", &RF::params.focus_radius, 0.05f, 0.5f);
+                ImGui::SliderFloat("Transition", &RF::params.transition, 0.05f, 0.5f);
+                ImGui::SliderFloat("Blur Strength", &RF::params.blur_strength, 0.0f, 3.0f);
+                ImGui::SliderFloat("Chromatic Aberration", &RF::params.chromatic, 0.0f, 0.1f);
                 ImGui::PopItemWidth();
             }
             ImGui::EndTabItem();
@@ -854,12 +658,12 @@ static void DrawUI() {
         ImGui::EndTabBar();
     }
 
-    // 底部：重置按钮
+    // Reset Button
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60);
     ImGui::Separator();
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 52);
     ImGui::SetCursorPosX(ImGui::GetWindowWidth() * 0.5f - 60);
-    if (ImGui::Button("重置", ImVec2(120, 40))) {
+    if (ImGui::Button("Reset", ImVec2(120, 40))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
     }
@@ -872,7 +676,7 @@ static void DrawUI() {
 }
 
 // ==========================================
-// 7. 剩余部分 (初始化/渲染/Hook)
+// 7. Init & Hook
 // ==========================================
 static void Setup() {
     if (g_Initialized || g_Width <= 0 || g_Height <= 0) return;
@@ -895,7 +699,6 @@ static void Setup() {
     ImGui_ImplOpenGL3_Init("#version 300 es");
     SetupStyle();
     g_Initialized = true;
-    LOGI("ImGui Setup Complete!");
 }
 
 static void RenderUI() {
@@ -956,6 +759,7 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
     if (!RF::resources_ready) InitFilterResources(w, h);
     Setup();
 
+    // 【关键】先渲染滤镜（现在是安全模式，只拷贝画面），再渲染 UI
     RenderFilters(w, h);
     RenderUI();
 
