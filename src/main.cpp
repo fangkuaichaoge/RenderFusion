@@ -442,7 +442,7 @@ void main() {
 }
 )";
 
-// 中国画风格 (Chinese Painting) - 重构版：淡雅水墨，留白透气
+// 中国画风格 (Chinese Painting) - 重构版：水墨浸润，保持原色
 const char* g_frag_chinese = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -456,49 +456,54 @@ void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
     
-    // 轻微提亮整体，营造淡雅感
-    result = result * 0.9 + 0.08;
+    // 水墨浸润效果 - 多层晕染
+    vec3 ink = result * 0.15;
     
-    // 降低饱和度 - 水墨淡雅
-    float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 0.7);
+    // 内层晕染 - 近距离
+    ink += texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb * 0.12;
     
-    // 水墨晕染 - 柔和模糊
-    vec3 blur = result * 0.35;
-    blur += texture2D(uTexture, vTexCoord + vec2(-1.2, 0.0) * uTexelSize).rgb * 0.14;
-    blur += texture2D(uTexture, vTexCoord + vec2( 1.2, 0.0) * uTexelSize).rgb * 0.14;
-    blur += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.2) * uTexelSize).rgb * 0.14;
-    blur += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.2) * uTexelSize).rgb * 0.14;
-    blur += texture2D(uTexture, vTexCoord + vec2(-2.0,-2.0) * uTexelSize).rgb * 0.0225;
-    blur += texture2D(uTexture, vTexCoord + vec2( 2.0,-2.0) * uTexelSize).rgb * 0.0225;
-    blur += texture2D(uTexture, vTexCoord + vec2(-2.0, 2.0) * uTexelSize).rgb * 0.0225;
-    blur += texture2D(uTexture, vTexCoord + vec2( 2.0, 2.0) * uTexelSize).rgb * 0.0225;
+    // 中层晕染 - 扩散
+    ink += texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb * 0.08;
+    ink += texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb * 0.08;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb * 0.08;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb * 0.08;
     
-    result = mix(result, blur, 0.3);
+    // 外层晕染 - 边缘渗透
+    ink += texture2D(uTexture, vTexCoord + vec2(-3.0,-3.0) * uTexelSize).rgb * 0.02;
+    ink += texture2D(uTexture, vTexCoord + vec2( 3.0,-3.0) * uTexelSize).rgb * 0.02;
+    ink += texture2D(uTexture, vTexCoord + vec2(-3.0, 3.0) * uTexelSize).rgb * 0.02;
+    ink += texture2D(uTexture, vTexCoord + vec2( 3.0, 3.0) * uTexelSize).rgb * 0.02;
+    ink += texture2D(uTexture, vTexCoord + vec2(-3.0, 0.0) * uTexelSize).rgb * 0.03;
+    ink += texture2D(uTexture, vTexCoord + vec2( 3.0, 0.0) * uTexelSize).rgb * 0.03;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-3.0) * uTexelSize).rgb * 0.03;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 3.0) * uTexelSize).rgb * 0.03;
     
-    // 细腻色调分离 - 水墨层次感
-    vec3 quantized = floor(result * 9.99) / 10.0;
-    result = mix(result, quantized, 0.25);
+    // 混合原色和浸润效果 - 保持原色为主
+    result = mix(result, ink, 0.45);
     
-    // 宣纸底纹
-    float paper = random(vTexCoord * 300.0) * 0.02;
-    result = result * (1.0 - paper * 0.5) + paper * 0.3;
+    // 轻微的色调分离 - 水墨层次感
+    vec3 quantized = floor(result * 7.99) / 8.0;
+    result = mix(result, quantized, 0.2);
     
-    // 柔和边缘勾勒 - 淡墨勾勒（用浅色，不是深色！）
+    // 宣纸纹理 - 细腻
+    float paper = random(vTexCoord * 250.0);
+    result = result * (1.0 - paper * 0.02);
+    
+    // 边缘勾勒 - 淡墨笔触
     float c4 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.5, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.5) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.5) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.5, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
     float edge = abs(c4 - c5) + abs(c4 - c6) + abs(c4 - c7) + abs(c4 - c0);
     float outline = smoothstep(0.02, 0.1, edge);
     
-    // 淡墨勾勒 - 用中灰色调，不是深色
-    vec3 lightInk = vec3(0.5, 0.48, 0.45);
-    result = mix(result, lightInk * result * 1.2, outline * 0.35);
-    
-    // 整体提亮，营造留白感
-    result = result * 0.95 + 0.03;
+    // 勾勒用原色的淡化版本，保持色彩
+    vec3 inkLine = result * 0.7;
+    result = mix(result, inkLine, outline * 0.4);
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
@@ -1573,13 +1578,19 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 
 static void hook_Input1(void* thiz, void* a1, void* a2) {
     if (orig_Input1) orig_Input1(thiz, a1, a2);
-    if (thiz && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
+    // a1 是 MotionEvent，thiz 是 InputConsumer 对象
+    if (a1 && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)a1);
 }
 
 static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
-    int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
-    if (r == 0 && e && *e && g_Initialized) ImGui_ImplAndroid_HandleInputEvent(*e);
-    return r;
+    // 先让 ImGui 处理
+    if (e && *e && g_Initialized) {
+        if (ImGui_ImplAndroid_HandleInputEvent(*e)) {
+            return 1;  // ImGui 处理了，阻止传播到游戏
+        }
+    }
+    // ImGui 未处理，传给原始函数
+    return orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
 }
 
 static void HookInput() {
