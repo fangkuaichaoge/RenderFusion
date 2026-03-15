@@ -47,6 +47,8 @@ namespace RF {
     GLuint screen_tex = 0;
     GLuint fbo = 0;
     GLuint fbo_tex = 0;
+    GLuint fbo2 = 0;        // 第二个 FBO（乒乓渲染）
+    GLuint fbo_tex2 = 0;    // 第二个 FBO 纹理
     GLuint quad_vbo = 0, quad_ebo = 0;
 
     // Shader Programs
@@ -111,8 +113,8 @@ namespace RF {
             {"Fresh & Clean", {true, 0.08f, 1.08f, 1.12f, 0.08f, 0.1f, false, false, 0.0f, 0.03f, false, 0.25f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
             // Vintage Film: 修复过暗问题，提升亮度，降低暗角，保留复古感不发黑
             {"Vintage Film", {true, 0.06f, 1.03f, 0.88f, -0.12f, 0.18f, false, true, 0.55f, 0.1f, false, 0.2f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            // High Contrast B&W: 提亮暗部，避免死黑
-            {"High Contrast B&W", {true, 0.03f, 1.25f, 0.0f, 0.0f, 0.15f, true, false, 0.0f, 0.0f, true, 0.7f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
+            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
             // Cinematic: 轻微提亮，降低暗角，避免画面发黑
             {"Cinematic", {true, 0.0f, 1.12f, 0.98f, -0.08f, 0.2f, false, false, 0.0f, 0.02f, false, 0.35f, false, 0.15f, 1.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
         };
@@ -157,7 +159,7 @@ void main() {
 }
 )";
 
-// MASTER FILTER: FIXED BRIGHTNESS, NO FORCED DARKEN
+// MASTER FILTER: FIXED BRIGHTNESS, NO FORCED DARKEN, MANGA-STYLE B&W
 const char* g_frag_master = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -216,8 +218,20 @@ void main() {
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
     result = mix(vec3(gray), result, uSaturation);
 
-    // Black & White
-    if (uEnableBW == 1) result = vec3(gray);
+    // Black & White - MANGA STYLE (高对比度纯黑纯白)
+    if (uEnableBW == 1) {
+        // 1. 先转灰度
+        gray = dot(result, vec3(0.299, 0.587, 0.114));
+        // 2. 高对比度增强
+        gray = (gray - 0.5) * 1.8 + 0.5;
+        // 3. 色调分离：将灰度映射到有限的黑白色阶，实现漫画效果
+        // 使用 3 个色阶：纯黑、中灰、纯白
+        float levels = 3.0;
+        gray = floor(gray * levels + 0.5) / levels;
+        // 4. 最终增强对比，确保纯黑纯白
+        gray = smoothstep(0.2, 0.8, gray);
+        result = vec3(gray);
+    }
 
     // Sepia Tone
     if (uEnableSepia == 1) {
@@ -386,12 +400,16 @@ void InitFilterResources(int w, int h) {
     if (RF::screen_tex != 0) {
         glDeleteTextures(1, &RF::screen_tex);
         if (RF::fbo_tex != 0) glDeleteTextures(1, &RF::fbo_tex);
+        if (RF::fbo_tex2 != 0) glDeleteTextures(1, &RF::fbo_tex2);
         if (RF::fbo != 0) glDeleteFramebuffers(1, &RF::fbo);
+        if (RF::fbo2 != 0) glDeleteFramebuffers(1, &RF::fbo2);
         if (RF::quad_vbo) glDeleteBuffers(1, &RF::quad_vbo);
         if (RF::quad_ebo) glDeleteBuffers(1, &RF::quad_ebo);
         RF::screen_tex = 0;
         RF::fbo_tex = 0;
+        RF::fbo_tex2 = 0;
         RF::fbo = 0;
+        RF::fbo2 = 0;
         RF::quad_vbo = 0;
         RF::quad_ebo = 0;
         CHECK_GL_ERROR();
@@ -430,6 +448,30 @@ void InitFilterResources(int w, int h) {
         RF::fbo_tex = 0;
     } else {
         LOGI("FBO created successfully");
+    }
+    
+    // Create second FBO for ping-pong rendering
+    glGenTextures(1, &RF::fbo_tex2);
+    glBindTexture(GL_TEXTURE_2D, RF::fbo_tex2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    
+    glGenFramebuffers(1, &RF::fbo2);
+    glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo2);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RF::fbo_tex2, 0);
+    
+    fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
+        LOGE("FBO2 incomplete: 0x%x", fboStatus);
+        glDeleteFramebuffers(1, &RF::fbo2);
+        glDeleteTextures(1, &RF::fbo_tex2);
+        RF::fbo2 = 0;
+        RF::fbo_tex2 = 0;
+    } else {
+        LOGI("FBO2 created successfully");
     }
     CHECK_GL_ERROR();
 
@@ -532,10 +574,10 @@ void RenderFilters(int w, int h) {
     CHECK_GL_ERROR();
 
     // ==========================================
-    // STEP 2: RENDER FILTERS
+    // STEP 2: RENDER FILTERS (Ping-Pong Rendering)
     // ==========================================
     GLuint final_tex = RF::screen_tex;
-    bool use_fbo = RF::fbo != 0 && RF::fbo_tex != 0;
+    bool use_fbo = RF::fbo != 0 && RF::fbo_tex != 0 && RF::fbo2 != 0 && RF::fbo_tex2 != 0;
 
     // Pass 1: Master Filter (Single Pass, NO FBO, SAFE)
     if (RF::prog_master != 0 && (RF::params.enable_master || RF::params.enable_bw || RF::params.enable_sepia || RF::params.enable_sharpen)) {
@@ -582,12 +624,23 @@ void RenderFilters(int w, int h) {
         CHECK_GL_ERROR();
     }
 
-    // Pass 2: Outline (Only if FBO is valid)
+    // Pass 2: Outline (Ping-Pong rendering to avoid texture feedback loop)
     if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
+        // 读取 final_tex，写入到另一个 FBO（乒乓渲染）
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        
+        // 如果是从 screen_tex 开始，默认写入 fbo
+        if (src_tex == RF::screen_tex) {
+            dst_fbo = RF::fbo;
+            dst_tex = RF::fbo_tex;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
         BindQuad(RF::prog_outline);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, final_tex);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
         
         GLint loc;
         loc = glGetUniformLocation(RF::prog_outline, "uTexture");
@@ -600,17 +653,23 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = RF::fbo_tex;
+        final_tex = dst_tex;
         CHECK_GL_ERROR();
     }
 
     // Pass 3: DOF (Only if FBO is valid)
     if (use_fbo && RF::prog_gaussian != 0 && RF::prog_dof != 0 && RF::params.enable_dof) {
+        // 确定当前源纹理，选择另一个 FBO 作为目标
+        GLuint sharp_tex = final_tex;
+        GLuint blur_dst_fbo = (sharp_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint blur_dst_tex = (sharp_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        if (sharp_tex == RF::screen_tex) { blur_dst_fbo = RF::fbo; blur_dst_tex = RF::fbo_tex; }
+        
         // Blur Pass 1: Horizontal
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, blur_dst_fbo);
         BindQuad(RF::prog_gaussian);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, final_tex);
+        glBindTexture(GL_TEXTURE_2D, sharp_tex);
         
         GLint loc;
         loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
@@ -623,29 +682,35 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint blurred_tex = RF::fbo_tex;
+        GLuint blurred_tex = blur_dst_tex;
 
-        // Blur Pass 2: Vertical
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
+        // Blur Pass 2: Vertical (乒乓：从 blur_dst_tex 读取，写入 sharp_tex 的 FBO)
+        GLuint blur2_dst_fbo = (blurred_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint blur2_dst_tex = (blurred_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, blur2_dst_fbo);
         BindQuad(RF::prog_gaussian);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, blurred_tex);
         loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
         SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        blurred_tex = RF::fbo_tex;
+        GLuint final_blur_tex = blur2_dst_tex;
 
-        // DOF Composite
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
+        // DOF Composite (乒乓渲染)
+        GLuint dof_dst_fbo = (final_blur_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dof_dst_tex = (final_blur_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, dof_dst_fbo);
         BindQuad(RF::prog_dof);
         
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, final_tex);
+        glBindTexture(GL_TEXTURE_2D, sharp_tex);
         loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
         SAFE_UNIFORM(loc, glUniform1i, 0);
         
         glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, blurred_tex);
+        glBindTexture(GL_TEXTURE_2D, final_blur_tex);
         loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
         SAFE_UNIFORM(loc, glUniform1i, 1);
         
@@ -661,7 +726,7 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = RF::fbo_tex;
+        final_tex = dof_dst_tex;
         CHECK_GL_ERROR();
     }
 
@@ -833,7 +898,7 @@ static void DrawUI() {
     ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "Custom");
     ImGui::Dummy(ImVec2(0, 8));
     
-    const char* preset_names[] = {"Original", "Fresh & Clean", "Vintage Film", "High Contrast B&W", "Cinematic"};
+    const char* preset_names[] = {"Original", "Fresh & Clean", "Vintage Film", "Manga B&W", "Cinematic"};
     for (int i = 0; i < 5; i++) {
         bool is_selected = (RF::current_preset == i);
         if (is_selected) {
@@ -900,8 +965,13 @@ static void DrawUI() {
         // Stylize Tab
         if (ImGui::BeginTabItem("Stylize")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Black & White", &RF::params.enable_bw);
-            ImGui::SameLine();
+            ImGui::Checkbox("Manga B&W (Comic Style)", &RF::params.enable_bw);
+            if (RF::params.enable_bw) {
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "High contrast B&W with posterization");
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tip: Enable Outline below for manga effect!");
+            }
+            
+            ImGui::Dummy(ImVec2(0, 8));
             ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia);
             
             if (RF::params.enable_sepia) {
