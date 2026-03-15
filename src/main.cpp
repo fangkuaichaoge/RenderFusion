@@ -57,6 +57,7 @@ namespace RF {
     GLuint prog_outline = 0;    // 描边
     GLuint prog_gaussian = 0;   // 高斯模糊
     GLuint prog_dof = 0;        // 景深
+    GLuint prog_tiktok = 0;     // TikTok RGB分层
     // Art Style Shaders
         GLuint prog_cel = 0;         // 赛璐璐卡通
         GLuint prog_chinese = 0;     // 中国画
@@ -105,6 +106,11 @@ namespace RF {
         // Art Styles
         int art_style = 0;      // 0=Off, 1=Cel Anime, 2=Chinese Painting, 3=Sketch, 4=Anime Flat, 5=Comic
         float art_intensity = 1.0f;
+        
+        // TikTok RGB Split
+        bool enable_tiktok = false;
+        float tiktok_offset = 0.005f;  // RGB偏移量
+        float tiktok_intensity = 1.0f;
     };
     
     FilterParams params;
@@ -389,6 +395,31 @@ void main() {
 }
 )";
 
+// TikTok RGB Split Shader - 红/蓝分层效果
+const char* g_frag_tiktok = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform float uOffset;
+uniform float uIntensity;
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    
+    // RGB 分层偏移
+    float r = texture2D(uTexture, vTexCoord + vec2(uOffset, 0.0)).r;
+    float g = color.g;
+    float b = texture2D(uTexture, vTexCoord - vec2(uOffset, 0.0)).b;
+    
+    vec3 rgbSplit = vec3(r, g, b);
+    
+    // 混合原色和分层效果
+    vec3 result = mix(color.rgb, rgbSplit, uIntensity);
+    
+    gl_FragColor = vec4(result, color.a);
+}
+)";
+
 // ==========================================
 // Art Style Shaders (性能优化版)
 // ==========================================
@@ -442,7 +473,7 @@ void main() {
 }
 )";
 
-// 中国画风格 (Chinese Painting) - 重构版：水墨浸润，保持原色
+// 中国画风格 (Chinese Painting) - 淡雅水墨版
 const char* g_frag_chinese = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -456,54 +487,49 @@ void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
     
-    // 水墨浸润效果 - 多层晕染
-    vec3 ink = result * 0.15;
+    // 降低饱和度 - 淡雅感
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 0.6);
     
-    // 内层晕染 - 近距离
-    ink += texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb * 0.12;
+    // 整体提亮 - 留白效果
+    result = result * 0.85 + 0.12;
     
-    // 中层晕染 - 扩散
-    ink += texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb * 0.08;
-    ink += texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb * 0.08;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb * 0.08;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb * 0.08;
+    // 水墨晕染 - 柔和扩散
+    vec3 ink = result * 0.2;
+    ink += texture2D(uTexture, vTexCoord + vec2(-1.5, 0.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 1.5, 0.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.5) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.5) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2(-2.5, -2.5) * uTexelSize).rgb * 0.04;
+    ink += texture2D(uTexture, vTexCoord + vec2( 2.5, -2.5) * uTexelSize).rgb * 0.04;
+    ink += texture2D(uTexture, vTexCoord + vec2(-2.5,  2.5) * uTexelSize).rgb * 0.04;
+    ink += texture2D(uTexture, vTexCoord + vec2( 2.5,  2.5) * uTexelSize).rgb * 0.04;
     
-    // 外层晕染 - 边缘渗透
-    ink += texture2D(uTexture, vTexCoord + vec2(-3.0,-3.0) * uTexelSize).rgb * 0.02;
-    ink += texture2D(uTexture, vTexCoord + vec2( 3.0,-3.0) * uTexelSize).rgb * 0.02;
-    ink += texture2D(uTexture, vTexCoord + vec2(-3.0, 3.0) * uTexelSize).rgb * 0.02;
-    ink += texture2D(uTexture, vTexCoord + vec2( 3.0, 3.0) * uTexelSize).rgb * 0.02;
-    ink += texture2D(uTexture, vTexCoord + vec2(-3.0, 0.0) * uTexelSize).rgb * 0.03;
-    ink += texture2D(uTexture, vTexCoord + vec2( 3.0, 0.0) * uTexelSize).rgb * 0.03;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-3.0) * uTexelSize).rgb * 0.03;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 3.0) * uTexelSize).rgb * 0.03;
+    result = mix(result, ink, 0.35);
     
-    // 混合原色和浸润效果 - 保持原色为主
-    result = mix(result, ink, 0.45);
+    // 淡墨色调分离 - 6阶，层次感
+    vec3 quantized = floor(result * 5.99) / 6.0;
+    result = mix(result, quantized, 0.25);
     
-    // 轻微的色调分离 - 水墨层次感
-    vec3 quantized = floor(result * 7.99) / 8.0;
-    result = mix(result, quantized, 0.2);
+    // 宣纸纹理 - 淡淡的
+    float paper = random(vTexCoord * 300.0);
+    result = result + paper * 0.02 - 0.01;
     
-    // 宣纸纹理 - 细腻
-    float paper = random(vTexCoord * 250.0);
-    result = result * (1.0 - paper * 0.02);
-    
-    // 边缘勾勒 - 淡墨笔触
+    // 淡墨勾勒 - 非常轻微
     float c4 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.5, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.5) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.5) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.5, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
     float edge = abs(c4 - c5) + abs(c4 - c6) + abs(c4 - c7) + abs(c4 - c0);
-    float outline = smoothstep(0.02, 0.1, edge);
+    float outline = smoothstep(0.015, 0.08, edge);
     
-    // 勾勒用原色的淡化版本，保持色彩
-    vec3 inkLine = result * 0.7;
-    result = mix(result, inkLine, outline * 0.4);
+    // 淡墨勾勒 - 用浅色
+    vec3 lightInk = result * 0.85;
+    result = mix(result, lightInk, outline * 0.3);
+    
+    // 最终整体淡雅调
+    result = result * 0.95 + 0.025;
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
@@ -825,6 +851,11 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_dof = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
     }
+    // TikTok RGB Split
+    if (RF::prog_tiktok == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_tiktok = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_tiktok));
+    }
     // Art style shaders
     if (RF::prog_cel == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
@@ -1063,7 +1094,32 @@ void RenderFilters(int w, int h) {
         CHECK_GL_ERROR();
     }
 
-    // Pass 4: Art Style (Cel, Ink, Painting, Oil, Sketch)
+    // Pass 4: TikTok RGB Split
+    if (RF::prog_tiktok != 0 && RF::params.enable_tiktok) {
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = use_fbo ? ((src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo) : 0;
+        GLuint dst_tex = use_fbo ? ((src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex) : RF::screen_tex;
+        if (src_tex == RF::screen_tex && use_fbo) { dst_fbo = RF::fbo; dst_tex = RF::fbo_tex; }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+        BindQuad(RF::prog_tiktok);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_tiktok, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_tiktok, "uOffset");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.tiktok_offset);
+        loc = glGetUniformLocation(RF::prog_tiktok, "uIntensity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.tiktok_intensity);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dst_tex;
+        CHECK_GL_ERROR();
+    }
+
+    // Pass 5: Art Style (Cel, Ink, Painting, Oil, Sketch)
     if (use_fbo && RF::params.art_style > 0) {
         GLuint src_tex = final_tex;
         GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
@@ -1434,6 +1490,15 @@ static void DrawUI() {
             if (RF::params.enable_sharpen) {
                 ImGui::SetNextItemWidth(-20);
                 ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f");
+            }
+            
+            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::Checkbox("TikTok RGB Split", &RF::params.enable_tiktok);
+            if (RF::params.enable_tiktok) {
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f");
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f");
             }
             ImGui::EndTabItem();
         }
