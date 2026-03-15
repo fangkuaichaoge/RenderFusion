@@ -1590,12 +1590,18 @@ static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4,
 }
 
 static void HookInput() {
-    void* s1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
+    void* sym1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
         "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
-    if (s1) GlossHook(s1, (void*)hook_Input1, (void**)&orig_Input1);
-    void* s2 = (void*)GlossSymbol(GlossOpen("libinput.so"),
-        "_ZN7android13InputConsumer7consumeEPNS_10InputEventEblPjPSA_", nullptr);
-    if (s2) GlossHook(s2, (void*)hook_Input2, (void**)&orig_Input2);
+    if (sym1) {
+        GHook h = GlossHook(sym1, (void*)hook_Input1, (void**)&orig_Input1);
+        if (h) return;
+    }
+    void* sym2 = (void*)GlossSymbol(GlossOpen("libinput.so"),
+        "_ZN7android13InputConsumer7consumeEPNS_26InputEventFactoryInterfaceEblPjPPNS_10InputEventE", nullptr);
+    if (sym2) {
+        GHook h = GlossHook(sym2, (void*)hook_Input2, (void**)&orig_Input2);
+        if (h) return;
+    }
 }
 
 static void* MainThread(void*) {
