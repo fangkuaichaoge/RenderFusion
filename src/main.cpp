@@ -27,6 +27,7 @@
 #define LOG_TAG "RenderFusion"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define SAFE_UNIFORM(loc, func, ...) if(loc >= 0) func(loc, __VA_ARGS__)
 
 // ==========================================
 // 1. Filter State & Params (ALL OFF BY DEFAULT)
@@ -70,9 +71,10 @@ namespace RF {
         bool enable_sharpen = false;
         float sharpen_intensity = 0.5f;
         
+        // Outline (Fixed: Pure Black, No Style Change)
         bool enable_outline = false;
-        float outline_thresh = 0.2f;
-        float outline_color = 0.0f;
+        float outline_thresh = 0.15f;
+        float outline_opacity = 1.0f;
 
         // Bokeh DOF
         bool enable_dof = false;
@@ -93,11 +95,11 @@ namespace RF {
 
     void ApplyPreset(int idx) {
         Preset presets[] = {
-            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.2f, 0.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
+            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.15f, 1.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
         };
         
         if (idx >= 0 && idx < 5) {
@@ -110,10 +112,16 @@ namespace RF {
             }
         }
     }
+
+    // Check if any filter is enabled
+    bool IsAnyFilterEnabled() {
+        return params.enable_master || params.enable_bw || params.enable_sepia || 
+               params.enable_sharpen || params.enable_outline || params.enable_dof;
+    }
 }
 
 // ==========================================
-// 2. Shader Source
+// 2. Fixed Shader Source
 // ==========================================
 const char* g_quad_vert = R"(
 attribute vec4 aPosition;
@@ -125,6 +133,7 @@ void main() {
 }
 )";
 
+// Base Draw Shader (NO CHANGE, SAFE)
 const char* g_frag_draw = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -134,6 +143,7 @@ void main() {
 }
 )";
 
+// Master Adjust Shader (Fixed Uniform Safety)
 const char* g_frag_master = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -155,19 +165,24 @@ void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
 
+    // Brightness & Contrast
     result = result + uBrightness;
     result = (result - 0.5) * uContrast + 0.5;
 
+    // Temperature
     vec3 warmFilter = vec3(1.0, 0.9, 0.8);
     vec3 coolFilter = vec3(0.8, 0.9, 1.0);
     vec3 tempFilter = mix(vec3(1.0), uTemperature > 0.0 ? warmFilter : coolFilter, abs(uTemperature));
     result *= tempFilter;
 
+    // Saturation
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
     result = mix(vec3(gray), result, uSaturation);
 
+    // Black & White
     if (uEnableBW == 1) result = vec3(gray);
 
+    // Sepia Tone
     if (uEnableSepia == 1) {
         vec3 sepiaColor;
         sepiaColor.r = dot(result, vec3(0.393, 0.769, 0.189));
@@ -176,26 +191,31 @@ void main() {
         result = mix(result, sepiaColor, uSepia);
     }
 
+    // Vignette
     vec2 center = vec2(0.5);
     float dist = distance(vTexCoord, center);
     float vignette = smoothstep(0.8, 0.3, dist * uVignette + (1.0 - uVignette));
     result *= vignette;
 
+    // Film Grain
     if (uGrain > 0.0) {
         float noise = (random(vTexCoord + uTime) - 0.5) * uGrain;
         result += noise;
     }
 
-    gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+    // Safe Clamp
+    gl_FragColor = vec4(clamp(result, 0.0, 1.0), color.a);
 }
 )";
 
+// Sharpen Shader (Fixed)
 const char* g_frag_sharpen = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
+
 void main() {
     vec3 center = texture2D(uTexture, vTexCoord).rgb;
     vec3 sampleTL = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
@@ -206,12 +226,15 @@ void main() {
     vec3 sampleBL = texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb;
     vec3 sampleB  = texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb;
     vec3 sampleBR = texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb;
+
     vec3 edge = center * 8.0 - (sampleTL + sampleT + sampleTR + sampleL + sampleR + sampleBL + sampleB + sampleBR);
     vec3 result = center + edge * uIntensity;
+    
     gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
 }
 )";
 
+// Gaussian Blur Shader (Fixed)
 const char* g_frag_gaussian = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -219,19 +242,25 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform vec2 uDirection;
 uniform float uRadius;
+
 void main() {
     vec4 result = vec4(0.0);
-    float weights[5]; weights[0] = 0.227027; weights[1] = 0.1945946; weights[2] = 0.1216216; weights[3] = 0.054054; weights[4] = 0.016216;
+    float weights[5]; 
+    weights[0] = 0.227027; weights[1] = 0.1945946; 
+    weights[2] = 0.1216216; weights[3] = 0.054054; 
+    weights[4] = 0.016216;
+    
     result += texture2D(uTexture, vTexCoord) * weights[0];
     for(int i = 1; i < 5; i++) {
         vec2 offset = uDirection * uTexelSize * float(i) * uRadius;
         result += texture2D(uTexture, vTexCoord + offset) * weights[i];
         result += texture2D(uTexture, vTexCoord - offset) * weights[i];
     }
-    gl_FragColor = result;
+    gl_FragColor = clamp(result, 0.0, 1.0);
 }
 )";
 
+// DOF Shader (Fixed)
 const char* g_frag_dof = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -242,9 +271,12 @@ uniform float uFocusRadius;
 uniform float uTransition;
 uniform float uBlurStrength;
 uniform float uChromatic;
+
 void main() {
     vec4 sharp = texture2D(uTex_Sharp, vTexCoord);
     vec4 blur = texture2D(uTex_Blur, vTexCoord);
+
+    // Chromatic Aberration
     if (uChromatic > 0.0) {
         float dist = distance(vTexCoord, uFocusPoint);
         float ca = dist * uChromatic * 2.0;
@@ -252,48 +284,62 @@ void main() {
         sharp.r = texture2D(uTex_Sharp, vTexCoord + offset).r;
         sharp.b = texture2D(uTex_Sharp, vTexCoord - offset).b;
     }
+
+    // Blur Factor
     float dist = distance(vTexCoord, uFocusPoint);
     float blurFactor = smoothstep(uFocusRadius, uFocusRadius + uTransition, dist);
     blurFactor *= uBlurStrength;
-    gl_FragColor = mix(sharp, blur, blurFactor);
+
+    gl_FragColor = mix(sharp, blur, clamp(blurFactor, 0.0, 1.0));
 }
 )";
 
+// ===================== FIXED OUTLINE SHADER =====================
+// NO STYLE CHANGE, ONLY PURE BLACK OUTLINE
 const char* g_frag_outline = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uThresh;
-uniform float uColor;
+uniform float uOpacity;
+
 void main() {
-    vec3 center = texture2D(uTexture, vTexCoord).rgb;
-    float grayCenter = dot(center, vec3(0.299, 0.587, 0.114));
-    float gx = 0.0; float gy = 0.0;
+    // Original Color (NO CHANGE TO ORIGINAL IMAGE)
+    vec4 original = texture2D(uTexture, vTexCoord);
+    float grayCenter = dot(original.rgb, vec3(0.299, 0.587, 0.114));
+
+    // Sobel Edge Detection
+    float gx = 0.0;
+    float gy = 0.0;
+    
     gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
     gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
+    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
+    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
+
     gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
     gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
+
     float edge = sqrt(gx*gx + gy*gy);
-    if (edge > uThresh) {
-        gl_FragColor = vec4(vec3(uColor), 1.0);
-    } else {
-        vec3 quantized = floor(center * 8.0) / 8.0;
-        gl_FragColor = vec4(quantized, 1.0);
-    }
+    float isEdge = step(uThresh, edge);
+
+    // ONLY OVERLAY BLACK EDGE, KEEP ORIGINAL IMAGE
+    vec3 finalColor = mix(original.rgb, vec3(0.0), isEdge * uOpacity);
+    gl_FragColor = vec4(finalColor, original.a);
 }
 )";
 
 static float g_Time = 0.0f;
 
 // ==========================================
-// 3. GL Utils
+// 3. GL Utils (Fixed Safety)
 // ==========================================
 GLuint CompileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
@@ -335,6 +381,7 @@ void InitFilterResources(int w, int h) {
         if(RF::quad_ebo) glDeleteBuffers(1, &RF::quad_ebo);
     }
 
+    // Screen Texture
     glGenTextures(1, &RF::screen_tex);
     glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -343,6 +390,7 @@ void InitFilterResources(int w, int h) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    // Ping-Pong FBO
     glGenTextures(2, RF::pingpong_tex);
     glGenFramebuffers(2, RF::pingpong_fbo);
     for (int i = 0; i < 2; i++) {
@@ -350,10 +398,20 @@ void InitFilterResources(int w, int h) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
         glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[i]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RF::pingpong_tex[i], 0);
+        
+        // FBO Completeness Check
+        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            LOGE("FBO %d incomplete: 0x%x", i, status);
+        }
     }
 
+    // Fullscreen Quad
     float vertices[] = { -1, 1, 0, 1,  -1, -1, 0, 0,  1, -1, 1, 0,  1, 1, 1, 1 };
     unsigned short indices[] = { 0, 1, 2, 0, 2, 3 };
     glGenBuffers(1, &RF::quad_vbo);
@@ -363,6 +421,7 @@ void InitFilterResources(int w, int h) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, RF::quad_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
+    // Compile Shaders
     if (RF::prog_draw == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_draw     = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_draw));
@@ -375,6 +434,7 @@ void InitFilterResources(int w, int h) {
     }
 
     RF::resources_ready = true;
+    LOGI("Filter resources initialized: %dx%d", w, h);
 }
 
 void BindQuad(GLuint prog) {
@@ -383,18 +443,24 @@ void BindQuad(GLuint prog) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, RF::quad_ebo);
     GLint pos = glGetAttribLocation(prog, "aPosition");
     GLint tex = glGetAttribLocation(prog, "aTexCoord");
-    if (pos >= 0) { glEnableVertexAttribArray(pos); glVertexAttribPointer(pos, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0); }
-    if (tex >= 0) { glEnableVertexAttribArray(tex); glVertexAttribPointer(tex, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float))); }
+    if (pos >= 0) { 
+        glEnableVertexAttribArray(pos); 
+        glVertexAttribPointer(pos, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0); 
+    }
+    if (tex >= 0) { 
+        glEnableVertexAttribArray(tex); 
+        glVertexAttribPointer(tex, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float))); 
+    }
 }
 
 // ==========================================
-// 4. Filter Rendering (Switch-Controlled, Safe)
+// 4. Filter Rendering (NO BLACK SCREEN FIXED)
 // ==========================================
 void RenderFilters(int w, int h) {
     if (!RF::resources_ready) return;
     g_Time += 0.016f;
 
-    // Save GL State
+    // Save Full GL State
     GLint last_prog, last_fbo, last_tex, last_vp[4], last_active;
     glGetIntegerv(GL_CURRENT_PROGRAM, &last_prog);
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &last_fbo);
@@ -405,49 +471,98 @@ void RenderFilters(int w, int h) {
     GLboolean last_depth = glIsEnabled(GL_DEPTH_TEST);
     GLboolean last_scissor = glIsEnabled(GL_SCISSOR_TEST);
 
-    glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST); 
+    glDisable(GL_DEPTH_TEST); 
+    glDisable(GL_BLEND);
     glViewport(0, 0, w, h);
 
-    // Step 1: Copy screen to texture
+    // Step 1: Copy Screen to Texture (ALWAYS WORKING)
     glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
     glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, w, h, 0);
 
+    // ==========================================
+    // SAFETY: IF NO FILTERS ENABLED, DIRECTLY DRAW ORIGINAL IMAGE
+    // ==========================================
+    if (!RF::IsAnyFilterEnabled()) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        BindQuad(RF::prog_draw);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
+        GLint loc = glGetUniformLocation(RF::prog_draw, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+
+        // Restore State
+        glUseProgram(last_prog);
+        glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
+        glActiveTexture(last_active);
+        glBindTexture(GL_TEXTURE_2D, last_tex);
+        glViewport(last_vp[0], last_vp[1], last_vp[2], last_vp[3]);
+        if (last_blend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+        if (last_depth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        if (last_scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+        return;
+    }
+
+    // ==========================================
+    // FILTER CHAIN (ONLY RUN WHEN FILTERS ARE ON)
+    // ==========================================
     GLuint current_tex = RF::screen_tex;
     int ping_idx = 0;
 
-    // Step 2: Filter Chain (ONLY RUN WHEN SWITCH IS ON)
-    // Pass 1: Master Adjustment
+    // Pass 1: Master Adjustment (Brightness/Contrast/BW/Sepia/Vignette/Grain)
     if (RF::params.enable_master || RF::params.enable_bw || RF::params.enable_sepia) {
         glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
         BindQuad(RF::prog_master);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uTexture"), 0);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uTime"), g_Time);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uBrightness"), RF::params.brightness);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uContrast"), RF::params.contrast);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uSaturation"), RF::params.saturation);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uTemperature"), RF::params.temperature);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uVignette"), RF::params.vignette);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableBW"), RF::params.enable_bw ? 1 : 0);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableSepia"), RF::params.enable_sepia ? 1 : 0);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uSepia"), RF::params.sepia_intensity);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uGrain"), RF::params.film_grain);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_master, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_master, "uTime");
+        SAFE_UNIFORM(loc, glUniform1f, g_Time);
+        loc = glGetUniformLocation(RF::prog_master, "uBrightness");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.brightness);
+        loc = glGetUniformLocation(RF::prog_master, "uContrast");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.contrast);
+        loc = glGetUniformLocation(RF::prog_master, "uSaturation");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.saturation);
+        loc = glGetUniformLocation(RF::prog_master, "uTemperature");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.temperature);
+        loc = glGetUniformLocation(RF::prog_master, "uVignette");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.vignette);
+        loc = glGetUniformLocation(RF::prog_master, "uEnableBW");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.enable_bw ? 1 : 0);
+        loc = glGetUniformLocation(RF::prog_master, "uEnableSepia");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.enable_sepia ? 1 : 0);
+        loc = glGetUniformLocation(RF::prog_master, "uSepia");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.sepia_intensity);
+        loc = glGetUniformLocation(RF::prog_master, "uGrain");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.film_grain);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         current_tex = RF::pingpong_tex[ping_idx];
         ping_idx = 1 - ping_idx;
     }
 
-    // Pass 2: Outline (Toon)
+    // Pass 2: Outline (Fixed Pure Black)
     if (RF::params.enable_outline) {
         glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
         BindQuad(RF::prog_outline);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_outline, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_outline, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uThresh"), RF::params.outline_thresh);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uColor"), RF::params.outline_color);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_outline, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_outline, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_outline, "uThresh");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_thresh);
+        loc = glGetUniformLocation(RF::prog_outline, "uOpacity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         current_tex = RF::pingpong_tex[ping_idx];
         ping_idx = 1 - ping_idx;
@@ -459,9 +574,15 @@ void RenderFilters(int w, int h) {
         BindQuad(RF::prog_sharpen);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_sharpen, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_sharpen, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform1f(glGetUniformLocation(RF::prog_sharpen, "uIntensity"), RF::params.sharpen_intensity);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_sharpen, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_sharpen, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_sharpen, "uIntensity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.sharpen_intensity);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         current_tex = RF::pingpong_tex[ping_idx];
         ping_idx = 1 - ping_idx;
@@ -475,17 +596,25 @@ void RenderFilters(int w, int h) {
         BindQuad(RF::prog_gaussian);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_gaussian, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 1.0f, 0.0f);
-        glUniform1f(glGetUniformLocation(RF::prog_gaussian, "uRadius"), RF::params.blur_strength * 4.0f);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f, 0.0f);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         ping_idx = 1 - ping_idx;
 
         // Blur Pass 2: Vertical
         glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
         glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[1-ping_idx]);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 0.0f, 1.0f);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
+        SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         GLuint blurred_tex = RF::pingpong_tex[ping_idx];
 
@@ -493,30 +622,42 @@ void RenderFilters(int w, int h) {
         ping_idx = 1 - ping_idx;
         glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
         BindQuad(RF::prog_dof);
+        
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Sharp"), 0);
+        loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, blurred_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Blur"), 1);
-        glUniform2f(glGetUniformLocation(RF::prog_dof, "uFocusPoint"), RF::params.focus_point.x, RF::params.focus_point.y);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uFocusRadius"), RF::params.focus_radius);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uTransition"), RF::params.transition);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uBlurStrength"), 1.0f);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uChromatic"), RF::params.chromatic);
+        loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
+        SAFE_UNIFORM(loc, glUniform1i, 1);
+        
+        loc = glGetUniformLocation(RF::prog_dof, "uFocusPoint");
+        SAFE_UNIFORM(loc, glUniform2f, RF::params.focus_point.x, RF::params.focus_point.y);
+        loc = glGetUniformLocation(RF::prog_dof, "uFocusRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.focus_radius);
+        loc = glGetUniformLocation(RF::prog_dof, "uTransition");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.transition);
+        loc = glGetUniformLocation(RF::prog_dof, "uBlurStrength");
+        SAFE_UNIFORM(loc, glUniform1f, 1.0f);
+        loc = glGetUniformLocation(RF::prog_dof, "uChromatic");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         final_tex = RF::pingpong_tex[ping_idx];
     }
 
-    // Step 3: Draw final result back to screen (NO glClear, avoid black screen)
+    // Step 3: Draw Final Result to Screen
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     BindQuad(RF::prog_draw);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, final_tex);
-    glUniform1i(glGetUniformLocation(RF::prog_draw, "uTexture"), 0);
+    GLint loc = glGetUniformLocation(RF::prog_draw, "uTexture");
+    SAFE_UNIFORM(loc, glUniform1i, 0);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
 
-    // Restore GL State
+    // Restore Full GL State
     glUseProgram(last_prog);
     glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
     glActiveTexture(last_active);
@@ -620,7 +761,7 @@ static void SetupStyle() {
 }
 
 // ==========================================
-// 6. UI Drawing (Full English, Fine-Tune Sliders)
+// 6. UI Drawing (Updated Outline Controls)
 // ==========================================
 static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
@@ -747,12 +888,12 @@ static void DrawUI() {
             }
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Outline (Toon Effect)", &RF::params.enable_outline);
+            ImGui::Checkbox("Black Outline", &RF::params.enable_outline);
             if (RF::params.enable_outline) {
                 ImGui::Dummy(ImVec2(0, 4));
                 ImGui::PushItemWidth(-1);
                 ImGui::SliderFloat("Outline Threshold", &RF::params.outline_thresh, 0.05f, 0.5f, "%.2f");
-                ImGui::SliderFloat("Outline Color", &RF::params.outline_color, 0.0f, 1.0f, "%.2f (0=Black, 1=White)");
+                ImGui::SliderFloat("Outline Opacity", &RF::params.outline_opacity, 0.0f, 1.0f, "%.2f");
                 ImGui::PopItemWidth();
             }
 
