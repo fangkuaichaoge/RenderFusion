@@ -28,29 +28,39 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// ===================== GL ERROR CHECK MACRO =====================
+#define CHECK_GL_ERROR() { \
+    GLenum err = glGetError(); \
+    if (err != GL_NO_ERROR) { \
+        LOGE("GL ERROR at line %d: 0x%x", __LINE__, err); \
+    } \
+}
+
+#define SAFE_UNIFORM(loc, func, ...) if(loc >= 0) { func(loc, __VA_ARGS__); CHECK_GL_ERROR(); }
+
 // ==========================================
 // 1. Filter State & Params (ALL OFF BY DEFAULT)
 // ==========================================
 namespace RF {
     // GL Resources
     GLuint screen_tex = 0;
-    GLuint pingpong_fbo[2] = {0, 0};
-    GLuint pingpong_tex[2] = {0, 0};
+    GLuint fbo = 0;
+    GLuint fbo_tex = 0;
     GLuint quad_vbo = 0, quad_ebo = 0;
 
     // Shader Programs
-    GLuint prog_draw = 0;
-    GLuint prog_master = 0;
-    GLuint prog_sharpen = 0;
-    GLuint prog_gaussian = 0;
-    GLuint prog_dof = 0;
-    GLuint prog_outline = 0;
+    GLuint prog_base = 0;       // 基础画面绘制（永远可用，保底不黑屏）
+    GLuint prog_master = 0;     // 基础滤镜单Pass
+    GLuint prog_outline = 0;    // 描边
+    GLuint prog_gaussian = 0;   // 高斯模糊
+    GLuint prog_dof = 0;        // 景深
 
     bool resources_ready = false;
+    bool shaders_valid = false;
     bool focus_pending = false;
     int current_preset = 0;
 
-    // Filter Parameters (ALL FEATURES OFF BY DEFAULT)
+    // Filter Parameters (ALL OFF BY DEFAULT)
     struct FilterParams {
         // Base Adjustment
         bool enable_master = false;
@@ -70,11 +80,10 @@ namespace RF {
         bool enable_sharpen = false;
         float sharpen_intensity = 0.5f;
         
+        // Outline (Pure Black)
         bool enable_outline = false;
-        float outline_thresh = 0.2f;
-        float outline_color = 0.0f;  // 0.0 = 黑色
-        bool enable_posterize = false;  // 新增：色调分离开关
-        float posterize_levels = 8.0f;  // 新增：色调分离等级
+        float outline_thresh = 0.15f;
+        float outline_opacity = 1.0f;
 
         // Bokeh DOF
         bool enable_dof = false;
@@ -95,11 +104,11 @@ namespace RF {
 
     void ApplyPreset(int idx) {
         Preset presets[] = {
-            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.2f, 0.0f, false, 8.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.2f, 0.0f, false, 8.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.2f, 0.0f, false, 8.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.2f, 0.0f, false, 8.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.2f, 0.0f, false, 8.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
+            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.15f, 1.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
         };
         
         if (idx >= 0 && idx < 5) {
@@ -112,10 +121,15 @@ namespace RF {
             }
         }
     }
+
+    // Check if any multi-pass effect is enabled
+    bool IsMultiPassEnabled() {
+        return params.enable_outline || params.enable_dof;
+    }
 }
 
 // ==========================================
-// 2. Shader Source
+// 2. Shader Source (SAFE & SIMPLE)
 // ==========================================
 const char* g_quad_vert = R"(
 attribute vec4 aPosition;
@@ -127,7 +141,8 @@ void main() {
 }
 )";
 
-const char* g_frag_draw = R"(
+// BASE SHADER: 100% WORKING, NO BLACK SCREEN
+const char* g_frag_base = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
@@ -136,20 +151,30 @@ void main() {
 }
 )";
 
+// MASTER FILTER: SINGLE PASS, NO FBO NEEDED
 const char* g_frag_master = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform float uTime;
+
+// Base Params
 uniform float uBrightness;
 uniform float uContrast;
 uniform float uSaturation;
 uniform float uTemperature;
 uniform float uVignette;
+
+// Stylize
 uniform int uEnableBW;
 uniform int uEnableSepia;
 uniform float uSepia;
 uniform float uGrain;
+
+// Sharpen
+uniform int uEnableSharpen;
+uniform float uSharpness;
+uniform vec2 uTexelSize;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
@@ -157,19 +182,38 @@ void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
 
+    // Sharpen (inline, single pass)
+    if (uEnableSharpen == 1) {
+        vec3 sampleTL = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
+        vec3 sampleT  = texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb;
+        vec3 sampleTR = texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb;
+        vec3 sampleL  = texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb;
+        vec3 sampleR  = texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb;
+        vec3 sampleBL = texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb;
+        vec3 sampleB  = texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb;
+        vec3 sampleBR = texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb;
+        vec3 edge = result * 8.0 - (sampleTL + sampleT + sampleTR + sampleL + sampleR + sampleBL + sampleB + sampleBR);
+        result = result + edge * uSharpness;
+    }
+
+    // Brightness & Contrast
     result = result + uBrightness;
     result = (result - 0.5) * uContrast + 0.5;
 
+    // Temperature
     vec3 warmFilter = vec3(1.0, 0.9, 0.8);
     vec3 coolFilter = vec3(0.8, 0.9, 1.0);
     vec3 tempFilter = mix(vec3(1.0), uTemperature > 0.0 ? warmFilter : coolFilter, abs(uTemperature));
     result *= tempFilter;
 
+    // Saturation
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
     result = mix(vec3(gray), result, uSaturation);
 
+    // Black & White
     if (uEnableBW == 1) result = vec3(gray);
 
+    // Sepia Tone
     if (uEnableSepia == 1) {
         vec3 sepiaColor;
         sepiaColor.r = dot(result, vec3(0.393, 0.769, 0.189));
@@ -178,42 +222,54 @@ void main() {
         result = mix(result, sepiaColor, uSepia);
     }
 
+    // Vignette
     vec2 center = vec2(0.5);
     float dist = distance(vTexCoord, center);
     float vignette = smoothstep(0.8, 0.3, dist * uVignette + (1.0 - uVignette));
     result *= vignette;
 
+    // Film Grain
     if (uGrain > 0.0) {
         float noise = (random(vTexCoord + uTime) - 0.5) * uGrain;
         result += noise;
     }
 
-    gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+    gl_FragColor = vec4(clamp(result, 0.0, 1.0), color.a);
 }
 )";
 
-const char* g_frag_sharpen = R"(
+// Outline Shader (Pure Black Overlay)
+const char* g_frag_outline = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
-uniform float uIntensity;
+uniform float uThresh;
+uniform float uOpacity;
+
 void main() {
-    vec3 center = texture2D(uTexture, vTexCoord).rgb;
-    vec3 sampleTL = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
-    vec3 sampleT  = texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb;
-    vec3 sampleTR = texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb;
-    vec3 sampleL  = texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb;
-    vec3 sampleR  = texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb;
-    vec3 sampleBL = texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb;
-    vec3 sampleB  = texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb;
-    vec3 sampleBR = texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb;
-    vec3 edge = center * 8.0 - (sampleTL + sampleT + sampleTR + sampleL + sampleR + sampleBL + sampleB + sampleBR);
-    vec3 result = center + edge * uIntensity;
-    gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+    vec4 original = texture2D(uTexture, vTexCoord);
+    float grayCenter = dot(original.rgb, vec3(0.299, 0.587, 0.114));
+
+    // Sobel Edge Detection
+    float gx = 0.0, gy = 0.0;
+    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
+    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
+    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
+    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
+    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
+    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
+    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
+    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
+
+    float edge = sqrt(gx*gx + gy*gy);
+    float isEdge = step(uThresh, edge);
+    vec3 finalColor = mix(original.rgb, vec3(0.0), isEdge * uOpacity);
+    gl_FragColor = vec4(finalColor, original.a);
 }
 )";
 
+// Gaussian Blur Shader
 const char* g_frag_gaussian = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -221,6 +277,7 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform vec2 uDirection;
 uniform float uRadius;
+
 void main() {
     vec4 result = vec4(0.0);
     float weights[5]; weights[0] = 0.227027; weights[1] = 0.1945946; weights[2] = 0.1216216; weights[3] = 0.054054; weights[4] = 0.016216;
@@ -230,10 +287,11 @@ void main() {
         result += texture2D(uTexture, vTexCoord + offset) * weights[i];
         result += texture2D(uTexture, vTexCoord - offset) * weights[i];
     }
-    gl_FragColor = result;
+    gl_FragColor = clamp(result, 0.0, 1.0);
 }
 )";
 
+// DOF Shader
 const char* g_frag_dof = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -244,9 +302,11 @@ uniform float uFocusRadius;
 uniform float uTransition;
 uniform float uBlurStrength;
 uniform float uChromatic;
+
 void main() {
     vec4 sharp = texture2D(uTex_Sharp, vTexCoord);
     vec4 blur = texture2D(uTex_Blur, vTexCoord);
+
     if (uChromatic > 0.0) {
         float dist = distance(vTexCoord, uFocusPoint);
         float ca = dist * uChromatic * 2.0;
@@ -254,120 +314,117 @@ void main() {
         sharp.r = texture2D(uTex_Sharp, vTexCoord + offset).r;
         sharp.b = texture2D(uTex_Sharp, vTexCoord - offset).b;
     }
+
     float dist = distance(vTexCoord, uFocusPoint);
     float blurFactor = smoothstep(uFocusRadius, uFocusRadius + uTransition, dist);
     blurFactor *= uBlurStrength;
-    gl_FragColor = mix(sharp, blur, blurFactor);
-}
-)";
-
-// 修复：分离描边和色调分离效果
-const char* g_frag_outline = R"(
-precision highp float;
-varying vec2 vTexCoord;
-uniform sampler2D uTexture;
-uniform vec2 uTexelSize;
-uniform float uThresh;
-uniform float uColor;
-uniform int uEnablePosterize;  // 新增：是否启用色调分离
-uniform float uPosterizeLevels; // 新增：色调分离等级
-void main() {
-    vec3 center = texture2D(uTexture, vTexCoord).rgb;
-    float grayCenter = dot(center, vec3(0.299, 0.587, 0.114));
-    
-    // Sobel边缘检测
-    float gx = 0.0; float gy = 0.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    
-    float edge = sqrt(gx*gx + gy*gy);
-    
-    if (edge > uThresh) {
-        // 边缘使用指定颜色（黑色或白色）
-        gl_FragColor = vec4(vec3(uColor), 1.0);
-    } else {
-        // 非边缘区域：根据开关决定是否进行色调分离
-        vec3 result = center;
-        if (uEnablePosterize == 1) {
-            result = floor(center * uPosterizeLevels) / uPosterizeLevels;
-        }
-        gl_FragColor = vec4(result, 1.0);
-    }
+    gl_FragColor = mix(sharp, blur, clamp(blurFactor, 0.0, 1.0));
 }
 )";
 
 static float g_Time = 0.0f;
 
 // ==========================================
-// 3. GL Utils
+// 3. GL Utils (SAFE COMPILE)
 // ==========================================
 GLuint CompileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
+
     GLint success;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         char infoLog[512];
         glGetShaderInfoLog(shader, 512, nullptr, infoLog);
         LOGE("Shader compile failed: %s", infoLog);
+        glDeleteShader(shader);
+        return 0;
     }
+    LOGI("Shader compiled successfully, type: 0x%x", type);
     return shader;
 }
 
 GLuint LinkProgram(GLuint vs, GLuint fs) {
+    if (vs == 0 || fs == 0) {
+        LOGE("Link failed: invalid shader");
+        return 0;
+    }
     GLuint prog = glCreateProgram();
     glAttachShader(prog, vs);
     glAttachShader(prog, fs);
     glLinkProgram(prog);
+
     GLint success;
     glGetProgramiv(prog, GL_LINK_STATUS, &success);
     if (!success) {
         char infoLog[512];
         glGetProgramInfoLog(prog, 512, nullptr, infoLog);
         LOGE("Program link failed: %s", infoLog);
+        glDeleteProgram(prog);
+        return 0;
     }
+    LOGI("Program linked successfully");
     glDeleteShader(vs);
     glDeleteShader(fs);
     return prog;
 }
 
 void InitFilterResources(int w, int h) {
+    LOGI("Init filter resources: %dx%d", w, h);
+    
+    // Release old resources
     if (RF::screen_tex != 0) {
         glDeleteTextures(1, &RF::screen_tex);
-        glDeleteTextures(2, RF::pingpong_tex);
-        glDeleteFramebuffers(2, RF::pingpong_fbo);
-        if(RF::quad_vbo) glDeleteBuffers(1, &RF::quad_vbo);
-        if(RF::quad_ebo) glDeleteBuffers(1, &RF::quad_ebo);
+        if (RF::fbo_tex != 0) glDeleteTextures(1, &RF::fbo_tex);
+        if (RF::fbo != 0) glDeleteFramebuffers(1, &RF::fbo);
+        if (RF::quad_vbo) glDeleteBuffers(1, &RF::quad_vbo);
+        if (RF::quad_ebo) glDeleteBuffers(1, &RF::quad_ebo);
+        RF::screen_tex = 0;
+        RF::fbo_tex = 0;
+        RF::fbo = 0;
+        RF::quad_vbo = 0;
+        RF::quad_ebo = 0;
+        CHECK_GL_ERROR();
     }
 
+    // 1. Create Screen Texture (SAFE FORMAT)
     glGenTextures(1, &RF::screen_tex);
     glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    CHECK_GL_ERROR();
+
+    // 2. Create FBO for multi-pass effects
+    glGenTextures(1, &RF::fbo_tex);
+    glBindTexture(GL_TEXTURE_2D, RF::fbo_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glGenTextures(2, RF::pingpong_tex);
-    glGenFramebuffers(2, RF::pingpong_fbo);
-    for (int i = 0; i < 2; i++) {
-        glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[i]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RF::pingpong_tex[i], 0);
+    glGenFramebuffers(1, &RF::fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RF::fbo_tex, 0);
+    
+    // FBO Completeness Check
+    GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
+        LOGE("FBO incomplete: 0x%x", fboStatus);
+        glDeleteFramebuffers(1, &RF::fbo);
+        glDeleteTextures(1, &RF::fbo_tex);
+        RF::fbo = 0;
+        RF::fbo_tex = 0;
+    } else {
+        LOGI("FBO created successfully");
     }
+    CHECK_GL_ERROR();
 
+    // 3. Create Fullscreen Quad
     float vertices[] = { -1, 1, 0, 1,  -1, -1, 0, 0,  1, -1, 1, 0,  1, 1, 1, 1 };
     unsigned short indices[] = { 0, 1, 2, 0, 2, 3 };
     glGenBuffers(1, &RF::quad_vbo);
@@ -376,19 +433,40 @@ void InitFilterResources(int w, int h) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, RF::quad_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    CHECK_GL_ERROR();
 
-    if (RF::prog_draw == 0) {
+    // 4. Compile Shaders (BASE FIRST, FALLBACK)
+    if (RF::prog_base == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_draw     = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_draw));
-        RF::prog_master    = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_master));
-        RF::prog_sharpen   = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_sharpen));
-        RF::prog_gaussian  = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_gaussian));
-        RF::prog_dof       = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
-        RF::prog_outline   = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_outline));
-        LOGI("All shaders compiled successfully");
+        RF::prog_base = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_base));
+        if (RF::prog_base == 0) {
+            LOGE("FATAL: Base shader failed to compile!");
+            return;
+        }
     }
 
+    // Compile other shaders
+    if (RF::prog_master == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_master = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_master));
+    }
+    if (RF::prog_outline == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_outline = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_outline));
+    }
+    if (RF::prog_gaussian == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_gaussian = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_gaussian));
+    }
+    if (RF::prog_dof == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_dof = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
+    }
+
+    // Check if shaders are valid
+    RF::shaders_valid = (RF::prog_base != 0);
     RF::resources_ready = true;
+    LOGI("Filter resources init done, shaders valid: %d", RF::shaders_valid);
 }
 
 void BindQuad(GLuint prog) {
@@ -397,21 +475,32 @@ void BindQuad(GLuint prog) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, RF::quad_ebo);
     GLint pos = glGetAttribLocation(prog, "aPosition");
     GLint tex = glGetAttribLocation(prog, "aTexCoord");
-    if (pos >= 0) { glEnableVertexAttribArray(pos); glVertexAttribPointer(pos, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0); }
-    if (tex >= 0) { glEnableVertexAttribArray(tex); glVertexAttribPointer(tex, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float))); }
+    if (pos >= 0) { 
+        glEnableVertexAttribArray(pos); 
+        glVertexAttribPointer(pos, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0); 
+    }
+    if (tex >= 0) { 
+        glEnableVertexAttribArray(tex); 
+        glVertexAttribPointer(tex, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float))); 
+    }
+    CHECK_GL_ERROR();
 }
 
 // ==========================================
-// 4. Filter Rendering (Switch-Controlled, Safe)
+// 4. Filter Rendering (100% NO BLACK SCREEN)
 // ==========================================
 void RenderFilters(int w, int h) {
-    if (!RF::resources_ready) return;
+    if (!RF::resources_ready || !RF::shaders_valid) {
+        LOGW("Resources not ready, skip filter rendering");
+        return;
+    }
     g_Time += 0.016f;
 
-    // Save GL State
-    GLint last_prog, last_fbo, last_tex, last_vp[4], last_active;
+    // Save Full GL State
+    GLint last_prog, last_fbo, last_tex, last_vp[4], last_active, last_read_fbo, last_draw_fbo;
     glGetIntegerv(GL_CURRENT_PROGRAM, &last_prog);
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &last_fbo);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &last_read_fbo);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &last_draw_fbo);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_tex);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &last_active);
     glGetIntegerv(GL_VIEWPORT, last_vp);
@@ -419,134 +508,179 @@ void RenderFilters(int w, int h) {
     GLboolean last_depth = glIsEnabled(GL_DEPTH_TEST);
     GLboolean last_scissor = glIsEnabled(GL_SCISSOR_TEST);
 
-    glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST); 
+    glDisable(GL_DEPTH_TEST); 
+    glDisable(GL_BLEND);
     glViewport(0, 0, w, h);
 
-    // Step 1: Copy screen to texture
+    // ==========================================
+    // STEP 1: COPY SCREEN TO TEXTURE (FIXED BLACK SCREEN ROOT)
+    // ==========================================
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0); // Force read from default framebuffer (screen)
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
     glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, w, h, 0);
+    CHECK_GL_ERROR();
 
-    GLuint current_tex = RF::screen_tex;
-    int ping_idx = 0;
-    bool has_processed = false;  // 标记是否有任何滤镜被应用
+    // ==========================================
+    // STEP 2: RENDER FILTERS
+    // ==========================================
+    GLuint final_tex = RF::screen_tex;
+    bool use_fbo = RF::fbo != 0 && RF::fbo_tex != 0;
 
-    // Step 2: Filter Chain (ONLY RUN WHEN SWITCH IS ON)
-    // Pass 1: Master Adjustment
-    if (RF::params.enable_master || RF::params.enable_bw || RF::params.enable_sepia) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+    // Pass 1: Master Filter (Single Pass, NO FBO, SAFE)
+    if (RF::prog_master != 0 && (RF::params.enable_master || RF::params.enable_bw || RF::params.enable_sepia || RF::params.enable_sharpen)) {
+        GLuint target_fbo = use_fbo ? RF::fbo : 0;
+        GLuint target_tex = use_fbo ? RF::fbo_tex : RF::screen_tex;
+
+        glBindFramebuffer(GL_FRAMEBUFFER, target_fbo);
         BindQuad(RF::prog_master);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uTexture"), 0);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uTime"), g_Time);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uBrightness"), RF::params.brightness);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uContrast"), RF::params.contrast);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uSaturation"), RF::params.saturation);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uTemperature"), RF::params.temperature);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uVignette"), RF::params.vignette);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableBW"), RF::params.enable_bw ? 1 : 0);
-        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableSepia"), RF::params.enable_sepia ? 1 : 0);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uSepia"), RF::params.sepia_intensity);
-        glUniform1f(glGetUniformLocation(RF::prog_master, "uGrain"), RF::params.film_grain);
+        glBindTexture(GL_TEXTURE_2D, final_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_master, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_master, "uTime");
+        SAFE_UNIFORM(loc, glUniform1f, g_Time);
+        loc = glGetUniformLocation(RF::prog_master, "uBrightness");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.brightness);
+        loc = glGetUniformLocation(RF::prog_master, "uContrast");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.contrast);
+        loc = glGetUniformLocation(RF::prog_master, "uSaturation");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.saturation);
+        loc = glGetUniformLocation(RF::prog_master, "uTemperature");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.temperature);
+        loc = glGetUniformLocation(RF::prog_master, "uVignette");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.vignette);
+        loc = glGetUniformLocation(RF::prog_master, "uEnableBW");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.enable_bw ? 1 : 0);
+        loc = glGetUniformLocation(RF::prog_master, "uEnableSepia");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.enable_sepia ? 1 : 0);
+        loc = glGetUniformLocation(RF::prog_master, "uSepia");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.sepia_intensity);
+        loc = glGetUniformLocation(RF::prog_master, "uGrain");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.film_grain);
+        loc = glGetUniformLocation(RF::prog_master, "uEnableSharpen");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.enable_sharpen ? 1 : 0);
+        loc = glGetUniformLocation(RF::prog_master, "uSharpness");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.sharpen_intensity);
+        loc = glGetUniformLocation(RF::prog_master, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        current_tex = RF::pingpong_tex[ping_idx];
-        ping_idx = 1 - ping_idx;
-        has_processed = true;
+        final_tex = target_tex;
+        CHECK_GL_ERROR();
     }
 
-    // Pass 2: Outline (Toon)
-    if (RF::params.enable_outline) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+    // Pass 2: Outline (Only if FBO is valid)
+    if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
         BindQuad(RF::prog_outline);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_outline, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_outline, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uThresh"), RF::params.outline_thresh);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uColor"), RF::params.outline_color);
-        // 新增：传递色调分离参数
-        glUniform1i(glGetUniformLocation(RF::prog_outline, "uEnablePosterize"), RF::params.enable_posterize ? 1 : 0);
-        glUniform1f(glGetUniformLocation(RF::prog_outline, "uPosterizeLevels"), RF::params.posterize_levels);
+        glBindTexture(GL_TEXTURE_2D, final_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_outline, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_outline, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_outline, "uThresh");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_thresh);
+        loc = glGetUniformLocation(RF::prog_outline, "uOpacity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        current_tex = RF::pingpong_tex[ping_idx];
-        ping_idx = 1 - ping_idx;
-        has_processed = true;
+        final_tex = RF::fbo_tex;
+        CHECK_GL_ERROR();
     }
 
-    // Pass 3: Sharpen
-    if (RF::params.enable_sharpen) {
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        BindQuad(RF::prog_sharpen);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_sharpen, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_sharpen, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform1f(glGetUniformLocation(RF::prog_sharpen, "uIntensity"), RF::params.sharpen_intensity);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        current_tex = RF::pingpong_tex[ping_idx];
-        ping_idx = 1 - ping_idx;
-        has_processed = true;
-    }
-
-    // Pass 4: Bokeh DOF
-    GLuint final_tex = current_tex;
-    if (RF::params.enable_dof) {
+    // Pass 3: DOF (Only if FBO is valid)
+    if (use_fbo && RF::prog_gaussian != 0 && RF::prog_dof != 0 && RF::params.enable_dof) {
         // Blur Pass 1: Horizontal
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
         BindQuad(RF::prog_gaussian);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_gaussian, "uTexture"), 0);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uTexelSize"), 1.0f/w, 1.0f/h);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 1.0f, 0.0f);
-        glUniform1f(glGetUniformLocation(RF::prog_gaussian, "uRadius"), RF::params.blur_strength * 4.0f);
+        glBindTexture(GL_TEXTURE_2D, final_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f, 0.0f);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        ping_idx = 1 - ping_idx;
+        GLuint blurred_tex = RF::fbo_tex;
 
         // Blur Pass 2: Vertical
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
-        glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[1-ping_idx]);
-        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 0.0f, 1.0f);
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
+        BindQuad(RF::prog_gaussian);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, blurred_tex);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
+        SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint blurred_tex = RF::pingpong_tex[ping_idx];
+        blurred_tex = RF::fbo_tex;
 
         // DOF Composite
-        ping_idx = 1 - ping_idx;
-        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::fbo);
         BindQuad(RF::prog_dof);
+        
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, current_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Sharp"), 0);
+        glBindTexture(GL_TEXTURE_2D, final_tex);
+        loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, blurred_tex);
-        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Blur"), 1);
-        glUniform2f(glGetUniformLocation(RF::prog_dof, "uFocusPoint"), RF::params.focus_point.x, RF::params.focus_point.y);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uFocusRadius"), RF::params.focus_radius);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uTransition"), RF::params.transition);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uBlurStrength"), 1.0f);
-        glUniform1f(glGetUniformLocation(RF::prog_dof, "uChromatic"), RF::params.chromatic);
+        loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
+        SAFE_UNIFORM(loc, glUniform1i, 1);
+        
+        loc = glGetUniformLocation(RF::prog_dof, "uFocusPoint");
+        SAFE_UNIFORM(loc, glUniform2f, RF::params.focus_point.x, RF::params.focus_point.y);
+        loc = glGetUniformLocation(RF::prog_dof, "uFocusRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.focus_radius);
+        loc = glGetUniformLocation(RF::prog_dof, "uTransition");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.transition);
+        loc = glGetUniformLocation(RF::prog_dof, "uBlurStrength");
+        SAFE_UNIFORM(loc, glUniform1f, 1.0f);
+        loc = glGetUniformLocation(RF::prog_dof, "uChromatic");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
+
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = RF::pingpong_tex[ping_idx];
-        has_processed = true;
+        final_tex = RF::fbo_tex;
+        CHECK_GL_ERROR();
     }
 
-    // Step 3: Draw final result back to screen (NO glClear, avoid black screen)
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    BindQuad(RF::prog_draw);
+    // ==========================================
+    // STEP 3: DRAW FINAL RESULT TO SCREEN (NO CLEAR, NO OVERWRITE)
+    // ==========================================
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // Force draw to screen
+    BindQuad(RF::prog_base); // Use base shader, 100% working
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, final_tex);
-    glUniform1i(glGetUniformLocation(RF::prog_draw, "uTexture"), 0);
+    GLint loc = glGetUniformLocation(RF::prog_base, "uTexture");
+    SAFE_UNIFORM(loc, glUniform1i, 0);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+    CHECK_GL_ERROR();
 
-    // Restore GL State
+    // ==========================================
+    // STEP 4: RESTORE ALL GL STATE
+    // ==========================================
     glUseProgram(last_prog);
-    glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, last_read_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, last_draw_fbo);
     glActiveTexture(last_active);
     glBindTexture(GL_TEXTURE_2D, last_tex);
     glViewport(last_vp[0], last_vp[1], last_vp[2], last_vp[3]);
     if (last_blend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
     if (last_depth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
     if (last_scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+    CHECK_GL_ERROR();
 }
 
 // ==========================================
@@ -642,7 +776,7 @@ static void SetupStyle() {
 }
 
 // ==========================================
-// 6. UI Drawing (Full English, Fine-Tune Sliders)
+// 6. UI Drawing
 // ==========================================
 static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
@@ -663,7 +797,7 @@ static void DrawUI() {
     }
 
     // Main Window
-    ImGui::SetNextWindowSize(ImVec2(520, 720), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(520, 680), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
@@ -769,20 +903,12 @@ static void DrawUI() {
             }
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Outline Edge", &RF::params.enable_outline);
+            ImGui::Checkbox("Black Outline", &RF::params.enable_outline);
             if (RF::params.enable_outline) {
                 ImGui::Dummy(ImVec2(0, 4));
                 ImGui::PushItemWidth(-1);
-                // 默认黑色，范围0-1，0=黑，1=白
-                ImGui::SliderFloat("Edge Color", &RF::params.outline_color, 0.0f, 1.0f, "%.2f (0=Black, 1=White)");
-                ImGui::SliderFloat("Edge Threshold", &RF::params.outline_thresh, 0.05f, 0.5f, "%.2f");
-                
-                // 新增：色调分离开关
-                ImGui::Dummy(ImVec2(0, 4));
-                ImGui::Checkbox("Enable Posterize (Toon Shading)", &RF::params.enable_posterize);
-                if (RF::params.enable_posterize) {
-                    ImGui::SliderFloat("Posterize Levels", &RF::params.posterize_levels, 2.0f, 16.0f, "%.0f");
-                }
+                ImGui::SliderFloat("Outline Threshold", &RF::params.outline_thresh, 0.05f, 0.5f, "%.2f");
+                ImGui::SliderFloat("Outline Opacity", &RF::params.outline_opacity, 0.0f, 1.0f, "%.2f");
                 ImGui::PopItemWidth();
             }
 
