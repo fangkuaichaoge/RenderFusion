@@ -29,7 +29,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 // ==========================================
-// 1. Filter State & Params
+// 1. Filter State & Params (ALL OFF BY DEFAULT)
 // ==========================================
 namespace RF {
     // GL Resources
@@ -50,20 +50,23 @@ namespace RF {
     bool focus_pending = false;
     int current_preset = 0;
 
-    // Filter Parameters
+    // Filter Parameters (ALL FEATURES OFF BY DEFAULT)
     struct FilterParams {
-        bool enable_master = true;
+        // Base Adjustment
+        bool enable_master = false;
         float brightness = 0.0f;
         float contrast = 1.0f;
         float saturation = 1.0f;
         float temperature = 0.0f;
         float vignette = 0.0f;
 
+        // Stylize
         bool enable_bw = false;
         bool enable_sepia = false;
         float sepia_intensity = 0.8f;
         float film_grain = 0.0f;
 
+        // Effects
         bool enable_sharpen = false;
         float sharpen_intensity = 0.5f;
         
@@ -71,12 +74,12 @@ namespace RF {
         float outline_thresh = 0.2f;
         float outline_color = 0.0f;
 
+        // Bokeh DOF
         bool enable_dof = false;
         ImVec2 focus_point = ImVec2(0.5f, 0.5f);
         float focus_radius = 0.15f;
         float blur_strength = 1.0f;
         float transition = 0.2f;
-        float bokeh_hex = 0.0f;
         float chromatic = 0.0f;
     };
     
@@ -90,11 +93,11 @@ namespace RF {
 
     void ApplyPreset(int idx) {
         Preset presets[] = {
-            {"Original", {true, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f, 0.0f}},
-            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.2f, 0.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.3f, 0.02f}}
+            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.2f, 0.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.2f, 0.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
         };
         
         if (idx >= 0 && idx < 5) {
@@ -110,7 +113,7 @@ namespace RF {
 }
 
 // ==========================================
-// 2. Shaders (Keep the same, omitted for space)
+// 2. Shader Source
 // ==========================================
 const char* g_quad_vert = R"(
 attribute vec4 aPosition;
@@ -296,6 +299,13 @@ GLuint CompileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
+    GLint success;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
+        LOGE("Shader compile failed: %s", infoLog);
+    }
     return shader;
 }
 
@@ -304,6 +314,13 @@ GLuint LinkProgram(GLuint vs, GLuint fs) {
     glAttachShader(prog, vs);
     glAttachShader(prog, fs);
     glLinkProgram(prog);
+    GLint success;
+    glGetProgramiv(prog, GL_LINK_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetProgramInfoLog(prog, 512, nullptr, infoLog);
+        LOGE("Program link failed: %s", infoLog);
+    }
     glDeleteShader(vs);
     glDeleteShader(fs);
     return prog;
@@ -354,6 +371,7 @@ void InitFilterResources(int w, int h) {
         RF::prog_gaussian  = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_gaussian));
         RF::prog_dof       = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
         RF::prog_outline   = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_quad_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_outline));
+        LOGI("All shaders compiled successfully");
     }
 
     RF::resources_ready = true;
@@ -370,12 +388,13 @@ void BindQuad(GLuint prog) {
 }
 
 // ==========================================
-// 4. Filter Rendering (SAFE MODE: NO FILTERS BY DEFAULT)
+// 4. Filter Rendering (Switch-Controlled, Safe)
 // ==========================================
 void RenderFilters(int w, int h) {
     if (!RF::resources_ready) return;
     g_Time += 0.016f;
 
+    // Save GL State
     GLint last_prog, last_fbo, last_tex, last_vp[4], last_active;
     glGetIntegerv(GL_CURRENT_PROGRAM, &last_prog);
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &last_fbo);
@@ -389,22 +408,115 @@ void RenderFilters(int w, int h) {
     glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
     glViewport(0, 0, w, h);
 
-    // 1. Copy screen
+    // Step 1: Copy screen to texture
     glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
     glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, w, h, 0);
 
-    // ==========================================
-    // 【关键修复】直接画回屏幕，不做任何处理，先确保画面不黑
-    // ==========================================
+    GLuint current_tex = RF::screen_tex;
+    int ping_idx = 0;
+
+    // Step 2: Filter Chain (ONLY RUN WHEN SWITCH IS ON)
+    // Pass 1: Master Adjustment
+    if (RF::params.enable_master || RF::params.enable_bw || RF::params.enable_sepia) {
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_master);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_master, "uTexture"), 0);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uTime"), g_Time);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uBrightness"), RF::params.brightness);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uContrast"), RF::params.contrast);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uSaturation"), RF::params.saturation);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uTemperature"), RF::params.temperature);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uVignette"), RF::params.vignette);
+        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableBW"), RF::params.enable_bw ? 1 : 0);
+        glUniform1i(glGetUniformLocation(RF::prog_master, "uEnableSepia"), RF::params.enable_sepia ? 1 : 0);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uSepia"), RF::params.sepia_intensity);
+        glUniform1f(glGetUniformLocation(RF::prog_master, "uGrain"), RF::params.film_grain);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        current_tex = RF::pingpong_tex[ping_idx];
+        ping_idx = 1 - ping_idx;
+    }
+
+    // Pass 2: Outline (Toon)
+    if (RF::params.enable_outline) {
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_outline);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_outline, "uTexture"), 0);
+        glUniform2f(glGetUniformLocation(RF::prog_outline, "uTexelSize"), 1.0f/w, 1.0f/h);
+        glUniform1f(glGetUniformLocation(RF::prog_outline, "uThresh"), RF::params.outline_thresh);
+        glUniform1f(glGetUniformLocation(RF::prog_outline, "uColor"), RF::params.outline_color);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        current_tex = RF::pingpong_tex[ping_idx];
+        ping_idx = 1 - ping_idx;
+    }
+
+    // Pass 3: Sharpen
+    if (RF::params.enable_sharpen) {
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_sharpen);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_sharpen, "uTexture"), 0);
+        glUniform2f(glGetUniformLocation(RF::prog_sharpen, "uTexelSize"), 1.0f/w, 1.0f/h);
+        glUniform1f(glGetUniformLocation(RF::prog_sharpen, "uIntensity"), RF::params.sharpen_intensity);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        current_tex = RF::pingpong_tex[ping_idx];
+        ping_idx = 1 - ping_idx;
+    }
+
+    // Pass 4: Bokeh DOF
+    GLuint final_tex = current_tex;
+    if (RF::params.enable_dof) {
+        // Blur Pass 1: Horizontal
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_gaussian);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_gaussian, "uTexture"), 0);
+        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uTexelSize"), 1.0f/w, 1.0f/h);
+        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 1.0f, 0.0f);
+        glUniform1f(glGetUniformLocation(RF::prog_gaussian, "uRadius"), RF::params.blur_strength * 4.0f);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        ping_idx = 1 - ping_idx;
+
+        // Blur Pass 2: Vertical
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[1-ping_idx]);
+        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 0.0f, 1.0f);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        GLuint blurred_tex = RF::pingpong_tex[ping_idx];
+
+        // DOF Composite
+        ping_idx = 1 - ping_idx;
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_dof);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Sharp"), 0);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, blurred_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Blur"), 1);
+        glUniform2f(glGetUniformLocation(RF::prog_dof, "uFocusPoint"), RF::params.focus_point.x, RF::params.focus_point.y);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uFocusRadius"), RF::params.focus_radius);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uTransition"), RF::params.transition);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uBlurStrength"), 1.0f);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uChromatic"), RF::params.chromatic);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = RF::pingpong_tex[ping_idx];
+    }
+
+    // Step 3: Draw final result back to screen (NO glClear, avoid black screen)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
     BindQuad(RF::prog_draw);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
+    glBindTexture(GL_TEXTURE_2D, final_tex);
     glUniform1i(glGetUniformLocation(RF::prog_draw, "uTexture"), 0);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
 
-    // Restore
+    // Restore GL State
     glUseProgram(last_prog);
     glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
     glActiveTexture(last_active);
@@ -508,7 +620,7 @@ static void SetupStyle() {
 }
 
 // ==========================================
-// 6. UI Drawing (Full English)
+// 6. UI Drawing (Full English, Fine-Tune Sliders)
 // ==========================================
 static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
@@ -579,6 +691,7 @@ static void DrawUI() {
     ImGui::BeginChild("Controls", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
     ImGui::SetCursorPos(ImVec2(16, 12));
 
+    // Focus point click logic
     if (RF::focus_pending && io.MouseClicked[0] && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
         RF::params.focus_point = ImVec2(io.MousePos.x / g_Width, io.MousePos.y / g_Height);
         RF::focus_pending = false;
@@ -588,68 +701,95 @@ static void DrawUI() {
         // Adjust Tab
         if (ImGui::BeginTabItem("Adjust")) {
             ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Checkbox("Enable Adjustment", &RF::params.enable_master);
+            ImGui::Dummy(ImVec2(0, 8));
             ImGui::PushItemWidth(-1);
             
             ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Temperature");
-            ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.0f");
+            ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f");
             
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Saturation");
-            ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.0f");
+            ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f");
             
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Contrast");
-            ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.0f");
+            ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f");
             
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Brightness");
-            ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.0f");
+            ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f");
+            
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Vignette");
+            ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f");
+
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Film Grain");
+            ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f");
             
             ImGui::PopItemWidth();
+            ImGui::EndTabItem();
+        }
+
+        // Stylize Tab
+        if (ImGui::BeginTabItem("Stylize")) {
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Checkbox("Black & White", &RF::params.enable_bw);
+            ImGui::SameLine();
+            ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia);
+            
+            if (RF::params.enable_sepia) {
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::PushItemWidth(-1);
+                ImGui::SliderFloat("Sepia Intensity", &RF::params.sepia_intensity, 0.0f, 1.0f, "%.2f");
+                ImGui::PopItemWidth();
+            }
+            
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Checkbox("Outline (Toon Effect)", &RF::params.enable_outline);
+            if (RF::params.enable_outline) {
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::PushItemWidth(-1);
+                ImGui::SliderFloat("Outline Threshold", &RF::params.outline_thresh, 0.05f, 0.5f, "%.2f");
+                ImGui::SliderFloat("Outline Color", &RF::params.outline_color, 0.0f, 1.0f, "%.2f (0=Black, 1=White)");
+                ImGui::PopItemWidth();
+            }
+
             ImGui::EndTabItem();
         }
 
         // Effects Tab
         if (ImGui::BeginTabItem("Effects")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Black & White", &RF::params.enable_bw);
-            ImGui::SameLine();
-            ImGui::Checkbox("Vintage", &RF::params.enable_sepia);
-            if (RF::params.enable_sepia) ImGui::SliderFloat("Vintage Intensity", &RF::params.sepia_intensity, 0.0f, 1.0f);
-            
-            ImGui::Dummy(ImVec2(0, 8));
             ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen);
-            if (RF::params.enable_sharpen) ImGui::SliderFloat("Sharpness", &RF::params.sharpen_intensity, 0.0f, 1.5f);
-            
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Outline (Toon)", &RF::params.enable_outline);
-            if (RF::params.enable_outline) ImGui::SliderFloat("Outline Thresh", &RF::params.outline_thresh, 0.05f, 0.5f);
-
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::SliderFloat("Vignette", &RF::params.vignette, 0.0f, 1.0f);
-            ImGui::SliderFloat("Film Grain", &RF::params.film_grain, 0.0f, 0.3f);
-
+            if (RF::params.enable_sharpen) {
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::PushItemWidth(-1);
+                ImGui::SliderFloat("Sharpness Intensity", &RF::params.sharpen_intensity, 0.0f, 1.5f, "%.2f");
+                ImGui::PopItemWidth();
+            }
             ImGui::EndTabItem();
         }
 
         // Bokeh DOF Tab
         if (ImGui::BeginTabItem("Bokeh DOF")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Enable DOF", &RF::params.enable_dof);
+            ImGui::Checkbox("Enable Depth of Field", &RF::params.enable_dof);
             
             if (RF::params.enable_dof) {
                 ImGui::Dummy(ImVec2(0, 8));
-                if (ImGui::Button(RF::focus_pending ? "Tap Screen to Focus!" : "Set Focus Point", ImVec2(-1, 40))) {
+                if (ImGui::Button(RF::focus_pending ? "Tap Screen to Set Focus!" : "Set Focus Point", ImVec2(-1, 40))) {
                     RF::focus_pending = !RF::focus_pending;
                 }
-                ImGui::Text("Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
+                ImGui::Text("Current Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
                 
                 ImGui::Dummy(ImVec2(0, 8));
                 ImGui::PushItemWidth(-1);
-                ImGui::SliderFloat("Clear Radius", &RF::params.focus_radius, 0.05f, 0.5f);
-                ImGui::SliderFloat("Transition", &RF::params.transition, 0.05f, 0.5f);
-                ImGui::SliderFloat("Blur Strength", &RF::params.blur_strength, 0.0f, 3.0f);
-                ImGui::SliderFloat("Chromatic Aberration", &RF::params.chromatic, 0.0f, 0.1f);
+                ImGui::SliderFloat("Clear Radius", &RF::params.focus_radius, 0.05f, 0.5f, "%.2f");
+                ImGui::SliderFloat("Transition Softness", &RF::params.transition, 0.05f, 0.5f, "%.2f");
+                ImGui::SliderFloat("Blur Strength", &RF::params.blur_strength, 0.0f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Chromatic Aberration", &RF::params.chromatic, 0.0f, 0.1f, "%.3f");
                 ImGui::PopItemWidth();
             }
             ImGui::EndTabItem();
@@ -663,7 +803,7 @@ static void DrawUI() {
     ImGui::Separator();
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 52);
     ImGui::SetCursorPosX(ImGui::GetWindowWidth() * 0.5f - 60);
-    if (ImGui::Button("Reset", ImVec2(120, 40))) {
+    if (ImGui::Button("Reset All", ImVec2(120, 40))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
     }
@@ -759,7 +899,6 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
     if (!RF::resources_ready) InitFilterResources(w, h);
     Setup();
 
-    // 【关键】先渲染滤镜（现在是安全模式，只拷贝画面），再渲染 UI
     RenderFilters(w, h);
     RenderUI();
 
