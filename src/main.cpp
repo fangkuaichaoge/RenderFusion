@@ -8,8 +8,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <string.h>
-#include <vector>
-#include <algorithm>
+#include <cmath>
 #include <mutex>
 
 #include "pl/Hook.h"
@@ -19,7 +18,60 @@
 #include "ImGui/backends/imgui_impl_opengl3.h"
 #include "ImGui/backends/imgui_impl_android.h"
 
-const char* vertexShaderSource = R"(
+#define RF_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "RenderFusion", __VA_ARGS__)
+
+// ==================== 全局状态管理 ====================
+namespace RF {
+    // 基础状态
+    bool initialized = false;
+    int width = 0, height = 0;
+    EGLContext target_ctx = EGL_NO_CONTEXT;
+    EGLSurface target_surface = EGL_NO_SURFACE;
+
+    // GL 资源
+    GLuint screen_tex = 0;
+    GLuint pingpong_fbo[2] = {0, 0};
+    GLuint pingpong_tex[2] = {0, 0};
+    GLuint vbo = 0, ebo = 0;
+
+    // 着色器程序
+    GLuint prog_draw = 0;
+    GLuint prog_color = 0;
+    GLuint prog_sharpen = 0;
+    GLuint prog_gaussian = 0;
+    GLuint prog_dof = 0;
+
+    // 交互状态
+    bool focus_pending = false; // 是否等待点击设置焦点
+
+    // 滤镜参数
+    struct Params {
+        // 基础
+        bool enable_correction = false;
+        float brightness = 0.0f;
+        float contrast = 1.0f;
+        float saturation = 1.0f;
+        
+        // 风格化
+        bool enable_sepia = false;
+        float sepia = 0.8f;
+
+        // 特效
+        bool enable_sharpen = false;
+        float sharpen = 0.5f;
+
+        // 景深
+        bool enable_dof = false;
+        ImVec2 focus_point = ImVec2(0.5f, 0.5f);
+        float focus_radius = 0.15f;
+        float blur_strength = 1.0f;
+        float transition = 0.2f;
+    };
+    Params params;
+}
+
+// ==================== 着色器源码 ====================
+const char* g_vert = R"(
 attribute vec4 aPosition;
 attribute vec2 aTexCoord;
 varying vec2 vTexCoord;
@@ -29,523 +81,521 @@ void main() {
 }
 )";
 
-const char* blendFragmentShaderSource = R"(
-precision highp float;
-varying vec2 vTexCoord;
-uniform sampler2D uCurrentFrame;
-uniform sampler2D uHistoryFrame;
-uniform float uBlendFactor;
-void main() {
-    vec4 current = texture2D(uCurrentFrame, vTexCoord);
-    vec4 history = texture2D(uHistoryFrame, vTexCoord);
-    vec4 result = mix(current, history, uBlendFactor);
-    gl_FragColor = vec4(result.rgb, 1.0);
-}
-)";
-
-const char* drawFragmentShaderSource = R"(
+const char* g_frag_draw = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 void main() {
-    vec4 color = texture2D(uTexture, vTexCoord);
-    gl_FragColor = vec4(color.rgb, 1.0);
+    gl_FragColor = texture2D(uTexture, vTexCoord);
 }
 )";
 
-static bool motion_blur_enabled = false;
-static float blur_strength = 0.85f;
+const char* g_frag_color = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform float uBrightness;
+uniform float uContrast;
+uniform float uSaturation;
+uniform float uSepia;
+uniform int uEnableSepia;
 
-static GLuint rawTexture = 0;
-static GLuint historyTextures[2] = {0, 0};
-static GLuint historyFBOs[2] = {0, 0};
-static int pingPongIndex = 0;
-static bool isFirstFrame = true;
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
 
-static GLuint blendShaderProgram = 0;
-static GLint blendPosLoc = -1;
-static GLint blendTexCoordLoc = -1;
-static GLint blendCurrentLoc = -1;
-static GLint blendHistoryLoc = -1;
-static GLint blendFactorLoc = -1;
+    result = result + uBrightness;
+    result = (result - 0.5) * uContrast + 0.5;
 
-static GLuint drawShaderProgram = 0;
-static GLint drawPosLoc = -1;
-static GLint drawTexCoordLoc = -1;
-static GLint drawTextureLoc = -1;
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, uSaturation);
 
-static GLuint vertexBuffer = 0;
-static GLuint indexBuffer = 0;
-
-static int blur_res_width = 0;
-static int blur_res_height = 0;
-
-void initializeMotionBlurResources(GLint width, GLint height) {
-    if (rawTexture != 0) {
-        glDeleteTextures(1, &rawTexture);
-        glDeleteTextures(2, historyTextures);
-        glDeleteFramebuffers(2, historyFBOs);
+    if (uEnableSepia == 1) {
+        vec3 sepiaColor;
+        sepiaColor.r = dot(result, vec3(0.393, 0.769, 0.189));
+        sepiaColor.g = dot(result, vec3(0.349, 0.686, 0.168));
+        sepiaColor.b = dot(result, vec3(0.272, 0.534, 0.131));
+        result = mix(result, sepiaColor, uSepia);
     }
 
-    if (blendShaderProgram == 0) {
-        GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vs, 1, &vertexShaderSource, nullptr);
-        glCompileShader(vs);
+    gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+}
+)";
 
-        GLuint fsBlend = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fsBlend, 1, &blendFragmentShaderSource, nullptr);
-        glCompileShader(fsBlend);
+const char* g_frag_sharpen = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uIntensity;
 
-        blendShaderProgram = glCreateProgram();
-        glAttachShader(blendShaderProgram, vs);
-        glAttachShader(blendShaderProgram, fsBlend);
-        glLinkProgram(blendShaderProgram);
+void main() {
+    vec3 center = texture2D(uTexture, vTexCoord).rgb;
+    vec3 sampleTL = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
+    vec3 sampleT  = texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb;
+    vec3 sampleTR = texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb;
+    vec3 sampleL  = texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb;
+    vec3 sampleR  = texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb;
+    vec3 sampleBL = texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb;
+    vec3 sampleB  = texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb;
+    vec3 sampleBR = texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb;
 
-        blendPosLoc = glGetAttribLocation(blendShaderProgram, "aPosition");
-        blendTexCoordLoc = glGetAttribLocation(blendShaderProgram, "aTexCoord");
-        blendCurrentLoc = glGetUniformLocation(blendShaderProgram, "uCurrentFrame");
-        blendHistoryLoc = glGetUniformLocation(blendShaderProgram, "uHistoryFrame");
-        blendFactorLoc = glGetUniformLocation(blendShaderProgram, "uBlendFactor");
+    vec3 edge = center * 8.0 - (sampleTL + sampleT + sampleTR + sampleL + sampleR + sampleBL + sampleB + sampleBR);
+    vec3 result = center + edge * uIntensity;
+    gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);
+}
+)";
 
-        GLuint fsDraw = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fsDraw, 1, &drawFragmentShaderSource, nullptr);
-        glCompileShader(fsDraw);
+const char* g_frag_gaussian = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform vec2 uDirection;
+uniform float uRadius;
 
-        drawShaderProgram = glCreateProgram();
-        glAttachShader(drawShaderProgram, vs);
-        glAttachShader(drawShaderProgram, fsDraw);
-        glLinkProgram(drawShaderProgram);
+void main() {
+    vec4 result = vec4(0.0);
+    float weights[5]; weights[0] = 0.227027; weights[1] = 0.1945946; weights[2] = 0.1216216; weights[3] = 0.054054; weights[4] = 0.016216;
+    
+    result += texture2D(uTexture, vTexCoord) * weights[0];
+    for(int i = 1; i < 5; i++) {
+        vec2 offset = uDirection * uTexelSize * float(i) * uRadius;
+        result += texture2D(uTexture, vTexCoord + offset) * weights[i];
+        result += texture2D(uTexture, vTexCoord - offset) * weights[i];
+    }
+    gl_FragColor = result;
+}
+)";
 
-        drawPosLoc = glGetAttribLocation(drawShaderProgram, "aPosition");
-        drawTexCoordLoc = glGetAttribLocation(drawShaderProgram, "aTexCoord");
-        drawTextureLoc = glGetUniformLocation(drawShaderProgram, "uTexture");
+const char* g_frag_dof = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTex_Sharp;
+uniform sampler2D uTex_Blur;
+uniform vec2 uFocusPoint;
+uniform float uFocusRadius;
+uniform float uTransition;
+uniform float uBlurStrength;
 
-        GLfloat vertices[] = { 
-            -1.0f, 1.0f, 0.0f, 1.0f, 
-            -1.0f, -1.0f, 0.0f, 0.0f, 
-            1.0f, -1.0f, 1.0f, 0.0f, 
-            1.0f, 1.0f, 1.0f, 1.0f 
-        };
-        GLushort indices[] = { 0, 1, 2, 0, 2, 3 };
+void main() {
+    vec4 sharp = texture2D(uTex_Sharp, vTexCoord);
+    vec4 blur = texture2D(uTex_Blur, vTexCoord);
+    float dist = distance(vTexCoord, uFocusPoint);
+    float blurFactor = smoothstep(uFocusRadius, uFocusRadius + uTransition, dist);
+    blurFactor *= uBlurStrength;
+    gl_FragColor = mix(sharp, blur, blurFactor);
+}
+)";
 
-        glGenBuffers(1, &vertexBuffer);
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+// ==================== GL 工具函数 ====================
+GLuint CompileShader(GLenum type, const char* src) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &src, nullptr);
+    glCompileShader(shader);
+    return shader;
+}
 
-        glGenBuffers(1, &indexBuffer);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+GLuint LinkProgram(GLuint vs, GLuint fs) {
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return prog;
+}
+
+void InitResources(int w, int h) {
+    if (RF::screen_tex != 0) {
+        glDeleteTextures(1, &RF::screen_tex);
+        glDeleteTextures(2, RF::pingpong_tex);
+        glDeleteFramebuffers(2, RF::pingpong_fbo);
+        if(RF::vbo) glDeleteBuffers(1, &RF::vbo);
+        if(RF::ebo) glDeleteBuffers(1, &RF::ebo);
     }
 
-    glGenTextures(1, &rawTexture);
-    glBindTexture(GL_TEXTURE_2D, rawTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glGenTextures(1, &RF::screen_tex);
+    glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glGenTextures(2, historyTextures);
-    glGenFramebuffers(2, historyFBOs);
-
+    glGenTextures(2, RF::pingpong_tex);
+    glGenFramebuffers(2, RF::pingpong_fbo);
     for (int i = 0; i < 2; i++) {
-        glBindTexture(GL_TEXTURE_2D, historyTextures[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, historyFBOs[i]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, historyTextures[i], 0);
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RF::pingpong_tex[i], 0);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    float vertices[] = { -1, 1, 0, 1,  -1, -1, 0, 0,  1, -1, 1, 0,  1, 1, 1, 1 };
+    unsigned short indices[] = { 0, 1, 2, 0, 2, 3 };
+    glGenBuffers(1, &RF::vbo);
+    glGenBuffers(1, &RF::ebo);
+    glBindBuffer(GL_ARRAY_BUFFER, RF::vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, RF::ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    blur_res_width = width;
-    blur_res_height = height;
-    pingPongIndex = 0;
-    isFirstFrame = true;
+    if (RF::prog_draw == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_vert);
+        RF::prog_draw     = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_draw));
+        RF::prog_color    = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_color));
+        RF::prog_sharpen  = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_sharpen));
+        RF::prog_gaussian = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_gaussian));
+        RF::prog_dof      = LinkProgram(CompileShader(GL_VERTEX_SHADER, g_vert), CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
+    }
+
+    RF::width = w;
+    RF::height = h;
 }
 
-void apply_motion_blur(int width, int height) {
-    if (width != blur_res_width || height != blur_res_height || rawTexture == 0) {
-        initializeMotionBlurResources(width, height);
+void BindQuad(GLuint prog) {
+    glUseProgram(prog);
+    glBindBuffer(GL_ARRAY_BUFFER, RF::vbo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, RF::ebo);
+    GLint pos = glGetAttribLocation(prog, "aPosition");
+    GLint tex = glGetAttribLocation(prog, "aTexCoord");
+    if (pos >= 0) { glEnableVertexAttribArray(pos); glVertexAttribPointer(pos, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0); }
+    if (tex >= 0) { glEnableVertexAttribArray(tex); glVertexAttribPointer(tex, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float))); }
+}
+
+// ==================== 渲染逻辑 ====================
+void RenderFilters() {
+    // 保存状态
+    GLint last_prog, last_fbo, last_tex, last_vp[4], last_active_tex;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &last_prog);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &last_fbo);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_tex);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &last_active_tex);
+    glGetIntegerv(GL_VIEWPORT, last_vp);
+    GLboolean last_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLboolean last_depth = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean last_blend = glIsEnabled(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
+
+    // 拷贝屏幕
+    glBindTexture(GL_TEXTURE_2D, RF::screen_tex);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, RF::width, RF::height, 0);
+    glViewport(0, 0, RF::width, RF::height);
+
+    GLuint current_tex = RF::screen_tex;
+    int ping_idx = 0;
+
+    // Pass 1: 颜色校正
+    if (RF::params.enable_correction || RF::params.enable_sepia) {
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_color);
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_color, "uTexture"), 0);
+        glUniform1f(glGetUniformLocation(RF::prog_color, "uBrightness"), RF::params.enable_correction ? RF::params.brightness : 0.0f);
+        glUniform1f(glGetUniformLocation(RF::prog_color, "uContrast"), RF::params.enable_correction ? RF::params.contrast : 1.0f);
+        glUniform1f(glGetUniformLocation(RF::prog_color, "uSaturation"), RF::params.enable_correction ? RF::params.saturation : 1.0f);
+        glUniform1i(glGetUniformLocation(RF::prog_color, "uEnableSepia"), RF::params.enable_sepia ? 1 : 0);
+        glUniform1f(glGetUniformLocation(RF::prog_color, "uSepia"), RF::params.sepia);
+        
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        current_tex = RF::pingpong_tex[ping_idx];
+        ping_idx = 1 - ping_idx;
     }
 
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-
-    glBindTexture(GL_TEXTURE_2D, rawTexture);
-    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, width, height, 0);
-
-    int curr = pingPongIndex;
-    int prev = 1 - pingPongIndex;
-
-    if (isFirstFrame) {
-        glBindFramebuffer(GL_FRAMEBUFFER, historyFBOs[curr]);
-        glViewport(0, 0, width, height);
-        
-        glUseProgram(drawShaderProgram);
+    // Pass 2: 锐化
+    if (RF::params.enable_sharpen) {
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_sharpen);
         
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, rawTexture);
-        glUniform1i(drawTextureLoc, 0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_sharpen, "uTexture"), 0);
+        glUniform2f(glGetUniformLocation(RF::prog_sharpen, "uTexelSize"), 1.0f/RF::width, 1.0f/RF::height);
+        glUniform1f(glGetUniformLocation(RF::prog_sharpen, "uIntensity"), RF::params.sharpen);
         
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-        
-        glEnableVertexAttribArray(drawPosLoc);
-        glVertexAttribPointer(drawPosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), nullptr);
-        glEnableVertexAttribArray(drawTexCoordLoc);
-        glVertexAttribPointer(drawTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
-        
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
-        
-        isFirstFrame = false;
-    } else {
-        glBindFramebuffer(GL_FRAMEBUFFER, historyFBOs[curr]);
-        glViewport(0, 0, width, height);
-        
-        glUseProgram(blendShaderProgram);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        current_tex = RF::pingpong_tex[ping_idx];
+        ping_idx = 1 - ping_idx;
+    }
 
+    // Pass 3: 景深
+    GLuint final_tex = current_tex;
+    if (RF::params.enable_dof) {
+        // 1. 模糊
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_gaussian);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, rawTexture);
-        glUniform1i(blendCurrentLoc, 0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_gaussian, "uTexture"), 0);
+        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uTexelSize"), 1.0f/RF::width, 1.0f/RF::height);
+        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 1.0f, 0.0f);
+        glUniform1f(glGetUniformLocation(RF::prog_gaussian, "uRadius"), RF::params.blur_strength * 4.0f);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        ping_idx = 1 - ping_idx;
 
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        glBindTexture(GL_TEXTURE_2D, RF::pingpong_tex[1-ping_idx]);
+        glUniform2f(glGetUniformLocation(RF::prog_gaussian, "uDirection"), 0.0f, 1.0f);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        GLuint blurred_tex = RF::pingpong_tex[ping_idx];
+
+        // 2. 合成
+        ping_idx = 1 - ping_idx;
+        glBindFramebuffer(GL_FRAMEBUFFER, RF::pingpong_fbo[ping_idx]);
+        BindQuad(RF::prog_dof);
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, current_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Sharp"), 0);
+        
         glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, historyTextures[prev]);
-        glUniform1i(blendHistoryLoc, 1);
+        glBindTexture(GL_TEXTURE_2D, blurred_tex);
+        glUniform1i(glGetUniformLocation(RF::prog_dof, "uTex_Blur"), 1);
 
-        glUniform1f(blendFactorLoc, blur_strength);
+        glUniform2f(glGetUniformLocation(RF::prog_dof, "uFocusPoint"), RF::params.focus_point.x, RF::params.focus_point.y);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uFocusRadius"), RF::params.focus_radius);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uTransition"), RF::params.transition);
+        glUniform1f(glGetUniformLocation(RF::prog_dof, "uBlurStrength"), 1.0f);
 
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-
-        glEnableVertexAttribArray(blendPosLoc);
-        glVertexAttribPointer(blendPosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), nullptr);
-        glEnableVertexAttribArray(blendTexCoordLoc);
-        glVertexAttribPointer(blendTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = RF::pingpong_tex[ping_idx];
     }
 
+    // Final: 画回屏幕
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, width, height);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glUseProgram(drawShaderProgram);
-
+    glClear(GL_COLOR_BUFFER_BIT);
+    BindQuad(RF::prog_draw);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, historyTextures[curr]);
-    glUniform1i(drawTextureLoc, 0);
+    glBindTexture(GL_TEXTURE_2D, final_tex);
+    glUniform1i(glGetUniformLocation(RF::prog_draw, "uTexture"), 0);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
 
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-
-    glEnableVertexAttribArray(drawPosLoc);
-    glVertexAttribPointer(drawPosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), nullptr);
-    glEnableVertexAttribArray(drawTexCoordLoc);
-    glVertexAttribPointer(drawTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
-
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
-
-    pingPongIndex = prev;
+    // 恢复状态
+    glUseProgram(last_prog);
+    glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
+    glActiveTexture(last_active_tex);
+    glBindTexture(GL_TEXTURE_2D, last_tex);
+    glViewport(last_vp[0], last_vp[1], last_vp[2], last_vp[3]);
+    if (last_scissor) glEnable(GL_SCISSOR_TEST);
+    if (last_depth) glEnable(GL_DEPTH_TEST);
+    if (last_blend) glEnable(GL_BLEND);
 }
 
-static bool g_initialized = false;
-static int g_width = 0, g_height = 0;
-static EGLContext g_targetcontext = EGL_NO_CONTEXT;
-static EGLSurface g_targetsurface = EGL_NO_SURFACE;
-static EGLBoolean (*orig_eglswapbuffers)(EGLDisplay, EGLSurface) = nullptr;
-
-struct WindowBounds {
-    float x, y, w, h;
-    bool visible;
-};
-static WindowBounds g_menuBounds = {0, 0, 0, 0, false};
-static std::mutex g_boundsMutex;
-
-
-
-
-void drawmenu() {
-    static bool show_menu = false;
-    static int current_tab = 0;
-
+// ==================== UI 绘制 ====================
+void DrawMenu() {
+    static bool show_menu = true;
     ImGuiIO& io = ImGui::GetIO();
 
-    
-    ImGui::SetNextWindowPos(ImVec2(0.0f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.0f, 0.5f)); // x=0, y=중앙, pivot=좌측중앙
-    ImGui::Begin("MenuTrigger", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground);
-    
-    
-    ImGui::SetWindowFontScale(1.5f);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.1f, 0.1f, 0.8f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 1.0f));
-    if (ImGui::Button("OPEN MENU", ImVec2(200, 80))) { 
-        show_menu = !show_menu;
-    }
+    // 触发按钮
+    ImGui::SetNextWindowPos(ImVec2(10.0f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.0f, 0.5f));
+    ImGui::Begin("##Trigger", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.95f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
+    ImGui::SetWindowFontScale(1.3f);
+    if (ImGui::Button(show_menu ? "HIDE" : "MENU", ImVec2(90, 60))) show_menu = !show_menu;
+    ImGui::PopStyleVar(1);
     ImGui::PopStyleColor(2);
-    ImGui::SetWindowFontScale(1.0f); 
+    ImGui::SetWindowFontScale(1.0f);
     ImGui::End();
 
-    if (show_menu) {
+    if (!show_menu) return;
+
+    // 主窗口
+    ImGui::SetNextWindowSize(ImVec2(520, 680), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.98f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+
+    ImGui::Begin("RenderFusion", &show_menu, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse);
+    
+    // 1. 顶部标题栏
+    ImVec2 win_pos = ImGui::GetWindowPos();
+    ImVec2 win_size = ImGui::GetWindowSize();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    // 彩虹渐变条
+    float time = (float)ImGui::GetTime();
+    ImU32 col1 = ImColor(ImVec4(0.2f, 0.5f, 1.0f, 1.0f));
+    ImU32 col2 = ImColor(ImVec4(1.0f, 0.3f, 0.8f, 1.0f));
+    draw_list->AddRectFilledMultiColor(win_pos, ImVec2(win_pos.x + win_size.x, win_pos.y + 4.0f), col1, col2, col1, col2);
+
+    ImGui::SetCursorPosY(12.0f);
+    ImGui::SetCursorPosX(20.0f);
+    ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "RenderFusion");
+    ImGui::SameLine(win_size.x - 100);
+    ImGui::SetCursorPosY(10.0f);
+    if (ImGui::SmallButton("Close")) show_menu = false;
+    ImGui::Separator();
+
+    ImGui::SetCursorPosY(30.0f);
+    ImGui::SetCursorPosX(20.0f);
+    
+    // 2. 内容区域
+    ImGui::BeginChild("Content", ImVec2(win_size.x - 40, win_size.y - 50), false);
+    
+    if (ImGui::CollapsingHeader("Image Adjustments", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(10);
+        ImGui::Checkbox("Enable Correction", &RF::params.enable_correction);
+        ImGui::SameLine();
+        ImGui::Checkbox("Sepia Tone", &RF::params.enable_sepia);
         
-        ImGui::SetNextWindowSize(ImVec2(1000, 650), ImGuiCond_Appearing);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.06f, 0.06f, 0.06f, 1.0f));
-
-        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse;
-        ImGui::Begin("CustomUI_Main", &show_menu, window_flags);
-
-        ImVec2 win_pos = ImGui::GetWindowPos();
-        ImVec2 win_size = ImGui::GetWindowSize();
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-        
-        float time = (float)ImGui::GetTime();
-        float r, g, b;
-        ImGui::ColorConvertHSVtoRGB(fmodf(time * 0.5f, 1.0f), 1.0f, 1.0f, r, g, b);
-        draw_list->AddRectFilled(win_pos, ImVec2(win_pos.x + win_size.x, win_pos.y + 5.0f), ImColor(r, g, b));
-
-        ImGui::SetCursorPosY(5.0f);
-
-        
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.04f, 0.04f, 0.04f, 1.0f));
-        ImGui::BeginChild("Sidebar", ImVec2(120, win_size.y - 5.0f), false);
-
-        for (int i = 0; i < 4; ++i) {
-            ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
-            ImVec2 center = ImVec2(cursor_pos.x + 60.0f, cursor_pos.y + 60.0f); // 중심점 이동
-            
-            if (current_tab == i) {
-                draw_list->AddRectFilled(cursor_pos, ImVec2(cursor_pos.x + 120.0f, cursor_pos.y + 120.0f), ImColor(0.12f, 0.12f, 0.12f, 1.0f));
-            }
-
-            if (ImGui::InvisibleButton((std::string("tab_") + std::to_string(i)).c_str(), ImVec2(120.0f, 120.0f))) {
-                current_tab = i;
-            }
-
-            ImU32 icon_color = (current_tab == i) ? ImColor(255, 255, 255) : ImColor(150, 150, 150);
-            float stroke_thick = 4.0f;
-            
-            
-            if (i == 0) {
-                draw_list->AddCircleFilled(ImVec2(center.x, center.y - 8), 12.0f, icon_color);
-                draw_list->PathArcTo(center, 22.0f, 0.0f, 3.14159f);
-                draw_list->PathStroke(icon_color, false, stroke_thick);
-            } else if (i == 1) {
-                draw_list->AddRectFilled(ImVec2(center.x - 12, center.y - 12), ImVec2(center.x + 12, center.y + 12), icon_color);
-                draw_list->AddRect(ImVec2(center.x - 20, center.y - 20), ImVec2(center.x + 20, center.y + 20), icon_color, 0.0f, 0, stroke_thick);
-            } else if (i == 2) {
-                draw_list->AddLine(ImVec2(center.x - 20, center.y - 20), ImVec2(center.x + 20, center.y + 20), icon_color, stroke_thick + 1.0f);
-                draw_list->AddLine(ImVec2(center.x + 20, center.y - 20), ImVec2(center.x - 20, center.y + 20), icon_color, stroke_thick + 1.0f);
-            } else if (i == 3) {
-                draw_list->AddLine(ImVec2(center.x - 20, center.y - 10), ImVec2(center.x + 20, center.y - 10), icon_color, stroke_thick);
-                draw_list->AddCircleFilled(ImVec2(center.x - 5, center.y - 10), 6.0f, icon_color);
-                draw_list->AddLine(ImVec2(center.x - 20, center.y + 10), ImVec2(center.x + 20, center.y + 10), icon_color, stroke_thick);
-                draw_list->AddCircleFilled(ImVec2(center.x + 8, center.y + 10), 6.0f, icon_color);
-            }
-        }
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
-
-        ImGui::SameLine(0, 0);
-
-        
-        ImGui::BeginChild("Content", ImVec2(win_size.x - 120.0f, win_size.y - 5.0f), false);
-        ImGui::SetCursorPos(ImVec2(40.0f, 40.0f));
-        
-        if (current_tab == 0) {
-            ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.2f, 0.8f, 0.4f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.15f, 0.15f, 0.15f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.2f, 0.2f, 0.2f, 1.0f));
-            
-            
-            ImGui::SetWindowFontScale(1.8f);
-        
-            ImGui::Checkbox("MOTION BLUR ON/OFF", &motion_blur_enabled);
-            
-            ImGui::Dummy(ImVec2(0.0f, 40.0f)); 
-            
-            ImGui::PushItemWidth(500.0f); 
-            ImGui::SliderFloat("BLUR STRENGTH", &blur_strength, 0.0f, 1.0f, "%.2f");
+        if (RF::params.enable_correction) {
+            ImGui::PushItemWidth(280);
+            ImGui::SliderFloat("Brightness", &RF::params.brightness, -0.4f, 0.4f);
+            ImGui::SliderFloat("Contrast", &RF::params.contrast, 0.6f, 1.8f);
+            ImGui::SliderFloat("Saturation", &RF::params.saturation, 0.0f, 2.0f);
             ImGui::PopItemWidth();
-
-            ImGui::SetWindowFontScale(1.0f); 
-            
-            ImGui::PopStyleColor(3);
-        } else {
-            ImGui::SetWindowFontScale(1.5f);
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Content for Tab %d", current_tab);
-            ImGui::SetWindowFontScale(1.0f);
         }
-
-        ImGui::EndChild();
-        ImGui::End();
-        ImGui::PopStyleColor();
-        ImGui::PopStyleVar(2);
+        if (RF::params.enable_sepia) {
+            ImGui::PushItemWidth(280);
+            ImGui::SliderFloat("Sepia Intensity", &RF::params.sepia, 0.0f, 1.0f);
+            ImGui::PopItemWidth();
+        }
+        ImGui::Unindent(10);
     }
+
+    ImGui::Dummy(ImVec2(0, 10));
+
+    if (ImGui::CollapsingHeader("Effects", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(10);
+        ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen);
+        if (RF::params.enable_sharpen) {
+            ImGui::PushItemWidth(280);
+            ImGui::SliderFloat("Intensity", &RF::params.sharpen, 0.0f, 1.5f);
+            ImGui::PopItemWidth();
+        }
+        ImGui::Unindent(10);
+    }
+
+    ImGui::Dummy(ImVec2(0, 10));
+
+    if (ImGui::CollapsingHeader("Bokeh Depth of Field", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent(10);
+        ImGui::Checkbox("Enable DOF", &RF::params.enable_dof);
+        
+        if (RF::params.enable_dof) {
+            // 点击设置焦点
+            if (ImGui::Button(RF::focus_pending ? "Click on Screen!" : "Set Focus Point", ImVec2(-1, 35))) {
+                RF::focus_pending = !RF::focus_pending;
+            }
+            
+            // 检测点击（简单实现）
+            if (RF::focus_pending && io.MouseClicked[0]) {
+                // 检查是否点击在菜单外
+                ImVec2 mouse_pos = io.MousePos;
+                if (!ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
+                    RF::params.focus_point = ImVec2(mouse_pos.x / RF::width, mouse_pos.y / RF::height);
+                    RF::focus_pending = false;
+                }
+            }
+
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Text("Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
+            
+            ImGui::PushItemWidth(280);
+            ImGui::SliderFloat("Clear Radius", &RF::params.focus_radius, 0.05f, 0.5f);
+            ImGui::SliderFloat("Transition", &RF::params.transition, 0.05f, 0.5f);
+            ImGui::SliderFloat("Blur Strength", &RF::params.blur_strength, 0.0f, 3.0f);
+            ImGui::PopItemWidth();
+        }
+        ImGui::Unindent(10);
+    }
+
+    ImGui::EndChild();
+    ImGui::End();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
 }
 
+// ==================== Hook 部分 ====================
+static EGLBoolean (*orig_eglSwapBuffers)(EGLDisplay, EGLSurface) = nullptr;
 
-
-
-static void setup() {
-    if (g_initialized || g_width <= 0) return;
+static void SetupImGui() {
+    if (RF::initialized) return;
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.FontGlobalScale = 1.4f;
     ImGui_ImplAndroid_Init();
     ImGui_ImplOpenGL3_Init("#version 300 es");
-    g_initialized = true;
+    RF::initialized = true;
+    RF_LOGI("ImGui Initialized");
 }
 
-static void render() {
-    if (!g_initialized) return;
+static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
+    if (!orig_eglSwapBuffers) return EGL_FALSE;
 
-    GLint last_active_texture; glGetIntegerv(GL_ACTIVE_TEXTURE, &last_active_texture);
-    glActiveTexture(GL_TEXTURE0);
-    GLint last_tex0; glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_tex0);
-    glActiveTexture(GL_TEXTURE1);
-    GLint last_tex1; glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_tex1);
-    glActiveTexture(last_active_texture);
-
-    GLint last_prog; glGetIntegerv(GL_CURRENT_PROGRAM, &last_prog);
-    GLint last_array_buffer; glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &last_array_buffer);
-    GLint last_element_array_buffer; glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &last_element_array_buffer);
-    GLint last_fbo; glGetIntegerv(GL_FRAMEBUFFER_BINDING, &last_fbo);
-    GLint last_viewport[4]; glGetIntegerv(GL_VIEWPORT, last_viewport);
-    GLboolean last_scissor = glIsEnabled(GL_SCISSOR_TEST);
-    GLboolean last_depth = glIsEnabled(GL_DEPTH_TEST);
-    GLboolean last_blend = glIsEnabled(GL_BLEND);
-
-    if (motion_blur_enabled) {
-        apply_motion_blur(g_width, g_height);
+    EGLContext ctx = eglGetCurrentContext();
+    
+    // 防掉保护
+    if (ctx != RF::target_ctx || s != RF::target_surface) {
+        if (RF::initialized) {
+            RF_LOGI("EGL Context changed! Resetting.");
+            RF::initialized = false;
+            RF::target_ctx = EGL_NO_CONTEXT;
+            RF::target_surface = EGL_NO_SURFACE;
+            RF::screen_tex = 0; // 标记资源重置
+        }
+        return orig_eglSwapBuffers(d, s);
     }
 
-    ImGuiIO& io = ImGui::GetIO();
-    io.DisplaySize = ImVec2((float)g_width, (float)g_height);
+    EGLint w, h;
+    eglQuerySurface(d, s, EGL_WIDTH, &w);
+    eglQuerySurface(d, s, EGL_HEIGHT, &h);
+    if (w < 100 || h < 100) return orig_eglSwapBuffers(d, s);
+
+    if (RF::target_ctx == EGL_NO_CONTEXT) {
+        RF::target_ctx = ctx;
+        RF::target_surface = s;
+    }
+
+    if (w != RF::width || h != RF::height || RF::screen_tex == 0) {
+        InitResources(w, h);
+    }
+
+    SetupImGui();
+
+    // 渲染滤镜
+    RenderFilters();
+
+    // 渲染 UI
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplAndroid_NewFrame(g_width, g_height);
+    ImGui_ImplAndroid_NewFrame(RF::width, RF::height);
     ImGui::NewFrame();
-    
-    drawmenu();
-    
+    DrawMenu();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    glUseProgram(last_prog);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, last_tex0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, last_tex1);
-    glActiveTexture(last_active_texture);
-
-    glBindBuffer(GL_ARRAY_BUFFER, last_array_buffer);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, last_element_array_buffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, last_fbo);
-    glViewport(last_viewport[0], last_viewport[1], last_viewport[2], last_viewport[3]);
-    if (last_scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
-    if (last_depth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-    if (last_blend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
-
-    if (blendPosLoc >= 0) glDisableVertexAttribArray(blendPosLoc);
-    if (blendTexCoordLoc >= 0) glDisableVertexAttribArray(blendTexCoordLoc);
-    if (drawPosLoc >= 0) glDisableVertexAttribArray(drawPosLoc);
-    if (drawTexCoordLoc >= 0) glDisableVertexAttribArray(drawTexCoordLoc);
-}
-
-static EGLBoolean hook_eglswapbuffers(EGLDisplay dpy, EGLSurface surf) {
-    if (!orig_eglswapbuffers) return EGL_FALSE;
-    EGLContext ctx = eglGetCurrentContext();
-    if (ctx == EGL_NO_CONTEXT || (g_targetcontext != EGL_NO_CONTEXT && (ctx != g_targetcontext || surf != g_targetsurface)))
-        return orig_eglswapbuffers(dpy, surf);
-    
-    EGLint w, h;
-    eglQuerySurface(dpy, surf, EGL_WIDTH, &w);
-    eglQuerySurface(dpy, surf, EGL_HEIGHT, &h);
-    if (w < 100 || h < 100) return orig_eglswapbuffers(dpy, surf);
-
-    if (g_targetcontext == EGL_NO_CONTEXT) { g_targetcontext = ctx; g_targetsurface = surf; }
-    g_width = w; g_height = h;
-    
-    setup();
-    render();
-    
-    return orig_eglswapbuffers(dpy, surf);
-}
-
-typedef bool (*PreloaderInput_OnTouch_Fn)(int action, int pointerId, float x, float y);
-
-struct PreloaderInput_Interface {
-    void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback);
-};
-
-typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
-
-bool OnTouchCallback(int action, int pointerId, float x, float y) {
-    if (!g_initialized) return false;
-    
-    ImGuiIO& io = ImGui::GetIO();
-    io.AddMousePosEvent(x, y);
-    
-    if (action == AMOTION_EVENT_ACTION_DOWN) {
-        io.AddMouseButtonEvent(0, true);
-    } else if (action == AMOTION_EVENT_ACTION_UP) {
-        io.AddMouseButtonEvent(0, false);
-    }
-    
-    bool hitTest = false;
-    {
-        std::lock_guard<std::mutex> lock(g_boundsMutex);
-        if (g_menuBounds.visible) {
-            if (x >= g_menuBounds.x && x <= (g_menuBounds.x + g_menuBounds.w) &&
-                y >= g_menuBounds.y && y <= (g_menuBounds.y + g_menuBounds.h)) {
-                hitTest = true;
-            }
-        }
-    }
-    
-    return hitTest || io.WantCaptureMouse;
+    return orig_eglSwapBuffers(d, s);
 }
 
 static void* mainthread(void*) {
     sleep(3);
     GlossInit(true);
+    
     GHandle hegl = GlossOpen("libEGL.so");
-
     if (hegl) {
         void* swap = (void*)GlossSymbol(hegl, "eglSwapBuffers", nullptr);
-        if (swap) GlossHook(swap, (void*)hook_eglswapbuffers, (void**)&orig_eglswapbuffers);
+        if (swap) GlossHook(swap, (void*)hook_eglSwapBuffers, (void**)&orig_eglSwapBuffers);
+        RF_LOGI("EGL Hooked");
     }
-
-    void* preloaderLib = dlopen("libpreloader.so", RTLD_NOW);
-    if (preloaderLib) {
-        GetPreloaderInput_Fn GetInput = (GetPreloaderInput_Fn)dlsym(preloaderLib, "GetPreloaderInput");
-        if (GetInput) {
-            PreloaderInput_Interface* input = GetInput();
-            if (input && input->RegisterTouchCallback) {
-                input->RegisterTouchCallback(OnTouchCallback);
-            }
-        }
-    }
-
     return nullptr;
 }
 
 __attribute__((constructor))
-void display_init() {
+void init() {
     pthread_t t;
     pthread_create(&t, nullptr, mainthread, nullptr);
 }
