@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.18)
-
-# 项目名改为 RenderFusion
 project(RenderFusion LANGUAGES C CXX)
+
+# ===================== 关键修复：强制指定 STL 类型 =====================
+set(ANDROID_STL c++_shared)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 编译优化与链接配置（保持原样）
+# 编译优化与链接配置
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fvisibility=hidden -ffunction-sections -fdata-sections -fexceptions -w")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -fvisibility=hidden -ffunction-sections -fdata-sections -w")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections,--strip-all -s")
@@ -18,7 +19,7 @@ cmake_policy(SET CMP0135 NEW)
 
 include(FetchContent)
 
-# ===================== 1. fmt库（固定稳定版） =====================
+# ===================== 1. fmt库 =====================
 FetchContent_Declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git
@@ -27,7 +28,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(fmt)
 
-# ===================== 2. preloader-android（自动拉取 pl 库） =====================
+# ===================== 2. preloader-android =====================
 FetchContent_Declare(
     preloader_android
     GIT_REPOSITORY https://github.com/LiteLDev/preloader-android.git
@@ -38,7 +39,7 @@ FetchContent_GetProperties(preloader_android)
 if(NOT preloader_android_POPULATED)
     FetchContent_Populate(preloader_android)
     
-    # 修复preloader的format依赖，替换为fmt库（解决NDK版本兼容问题）
+    # 修复preloader的format依赖
     file(READ "${preloader_android_SOURCE_DIR}/src/pl/Logger.h" LOGGER_CONTENT)
     string(REPLACE "#include <format>" "#include <fmt/format.h>" LOGGER_CONTENT "${LOGGER_CONTENT}")
     string(REPLACE "std::vformat" "fmt::vformat" LOGGER_CONTENT "${LOGGER_CONTENT}")
@@ -49,7 +50,7 @@ if(NOT preloader_android_POPULATED)
 endif()
 target_link_libraries(preloader PUBLIC fmt::fmt)
 
-# ===================== 项目头文件与源文件配置 =====================
+# ===================== 项目配置 =====================
 target_include_directories(preloader PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/ImGui
@@ -66,10 +67,8 @@ set(SOURCES
     src/ImGui/backends/imgui_impl_android.cpp
 )
 
-# 生成最终的 libRenderFusion.so
 add_library(RenderFusion SHARED ${SOURCES})
 
-# 链接所有依赖库
 target_link_libraries(RenderFusion
     preloader
     fmt::fmt
@@ -80,7 +79,7 @@ target_link_libraries(RenderFusion
     GLESv2
 )
 
-# ===================== 输出目录配置 =====================
+# ===================== 输出目录 =====================
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/output)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/output)
