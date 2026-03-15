@@ -1583,14 +1583,9 @@ static void hook_Input1(void* thiz, void* a1, void* a2) {
 }
 
 static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
-    // 先让 ImGui 处理
-    if (e && *e && g_Initialized) {
-        if (ImGui_ImplAndroid_HandleInputEvent(*e)) {
-            return 1;  // ImGui 处理了，阻止传播到游戏
-        }
-    }
-    // ImGui 未处理，传给原始函数
-    return orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
+    int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
+    if (r == 0 && e && *e && g_Initialized) ImGui_ImplAndroid_HandleInputEvent(*e);
+    return r;
 }
 
 static void HookInput() {
