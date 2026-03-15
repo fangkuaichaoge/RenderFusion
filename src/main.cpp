@@ -1576,26 +1576,26 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
     return orig_eglSwapBuffers(d, s);
 }
 
+// ===================== Input Hook =====================
 static void hook_Input1(void* thiz, void* a1, void* a2) {
     if (orig_Input1) orig_Input1(thiz, a1, a2);
-    // a1 是 MotionEvent，thiz 是 InputConsumer 对象
-    if (a1 && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)a1);
+    if (thiz && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
 }
 
 static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
     int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
-    if (r == 0 && e && *e && g_Initialized) ImGui_ImplAndroid_HandleInputEvent(*e);
+    if (r == 0 && e && *e && g_Initialized)
+        ImGui_ImplAndroid_HandleInputEvent(*e);
     return r;
 }
 
 static void HookInput() {
-    void* handle = GlossOpen("libinput.so");
-    if (handle) {
-        void* s1 = (void*)GlossSymbol(handle, "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
-        if (s1) GlossHook(s1, (void*)hook_Input1, (void**)&orig_Input1);
-        void* s2 = (void*)GlossSymbol(handle, "_ZN7android13InputConsumer7consumeEPNS_10InputEventEblPjPSA_", nullptr);
-        if (s2) GlossHook(s2, (void*)hook_Input2, (void**)&orig_Input2);
-    }
+    void* s1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
+        "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
+    if (s1) GlossHook(s1, (void*)hook_Input1, (void**)&orig_Input1);
+    void* s2 = (void*)GlossSymbol(GlossOpen("libinput.so"),
+        "_ZN7android13InputConsumer7consumeEPNS_10InputEventEblPjPSA_", nullptr);
+    if (s2) GlossHook(s2, (void*)hook_Input2, (void**)&orig_Input2);
 }
 
 static void* MainThread(void*) {
