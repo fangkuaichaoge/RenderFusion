@@ -61,7 +61,7 @@ namespace RF {
     bool focus_pending = false;
     int current_preset = 0;
 
-    // Filter Parameters (ALL OFF BY DEFAULT)
+    // Filter Parameters (ALL OFF BY DEFAULT, NO FORCED BLACK EDGE)
     struct FilterParams {
         // Base Adjustment
         bool enable_master = false;
@@ -69,7 +69,7 @@ namespace RF {
         float contrast = 1.0f;
         float saturation = 1.0f;
         float temperature = 0.0f;
-        float vignette = 0.0f;
+        float vignette = 0.0f; // 默认0，无黑边
 
         // Stylize
         bool enable_bw = false;
@@ -97,7 +97,7 @@ namespace RF {
     
     FilterParams params;
     
-    // Preset Definition
+    // Preset Definition (FIXED: NO FORCED DARK EDGE, NO OVER-DARKEN)
     struct Preset {
         const char* name;
         FilterParams p;
@@ -105,11 +105,16 @@ namespace RF {
 
     void ApplyPreset(int idx) {
         Preset presets[] = {
+            // Original: 完全无修改，无黑边，无滤镜
             {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Fresh & Clean", {true, 0.05f, 1.1f, 1.15f, 0.1f, 0.15f, false, false, 0.0f, 0.05f, false, 0.3f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Vintage Film", {true, 0.0f, 1.05f, 0.85f, -0.2f, 0.35f, false, true, 0.6f, 0.15f, false, 0.2f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"High Contrast B&W", {true, 0.0f, 1.3f, 0.0f, 0.0f, 0.2f, true, false, 0.0f, 0.0f, true, 0.8f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            {"Cinematic", {true, -0.03f, 1.15f, 0.95f, -0.1f, 0.25f, false, false, 0.0f, 0.03f, false, 0.4f, false, 0.15f, 1.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
+            // Fresh & Clean: 轻微提亮，极低暗角，不发黑
+            {"Fresh & Clean", {true, 0.08f, 1.08f, 1.12f, 0.08f, 0.1f, false, false, 0.0f, 0.03f, false, 0.25f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            // Vintage Film: 修复过暗问题，提升亮度，降低暗角，保留复古感不发黑
+            {"Vintage Film", {true, 0.06f, 1.03f, 0.88f, -0.12f, 0.18f, false, true, 0.55f, 0.1f, false, 0.2f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            // High Contrast B&W: 提亮暗部，避免死黑
+            {"High Contrast B&W", {true, 0.03f, 1.25f, 0.0f, 0.0f, 0.15f, true, false, 0.0f, 0.0f, true, 0.7f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            // Cinematic: 轻微提亮，降低暗角，避免画面发黑
+            {"Cinematic", {true, 0.0f, 1.12f, 0.98f, -0.08f, 0.2f, false, false, 0.0f, 0.02f, false, 0.35f, false, 0.15f, 1.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
         };
         
         if (idx >= 0 && idx < 5) {
@@ -130,7 +135,7 @@ namespace RF {
 }
 
 // ==========================================
-// 2. Shader Source (SAFE & SIMPLE)
+// 2. Shader Source (FIXED BRIGHTNESS CALCULATION)
 // ==========================================
 const char* g_quad_vert = R"(
 attribute vec4 aPosition;
@@ -152,7 +157,7 @@ void main() {
 }
 )";
 
-// MASTER FILTER: SINGLE PASS, NO FBO NEEDED
+// MASTER FILTER: FIXED BRIGHTNESS, NO FORCED DARKEN
 const char* g_frag_master = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -197,9 +202,9 @@ void main() {
         result = result + edge * uSharpness;
     }
 
-    // Brightness & Contrast
-    result = result + uBrightness;
+    // Brightness & Contrast (FIXED: 先对比度后亮度，避免压暗画面)
     result = (result - 0.5) * uContrast + 0.5;
+    result = result + uBrightness;
 
     // Temperature
     vec3 warmFilter = vec3(1.0, 0.9, 0.8);
@@ -223,11 +228,13 @@ void main() {
         result = mix(result, sepiaColor, uSepia);
     }
 
-    // Vignette
-    vec2 center = vec2(0.5);
-    float dist = distance(vTexCoord, center);
-    float vignette = smoothstep(0.8, 0.3, dist * uVignette + (1.0 - uVignette));
-    result *= vignette;
+    // Vignette (FIXED: 仅当数值>0时生效，无强制黑边)
+    if (uVignette > 0.0) {
+        vec2 center = vec2(0.5);
+        float dist = distance(vTexCoord, center);
+        float vignette = smoothstep(0.8, 0.3, dist * uVignette + (1.0 - uVignette));
+        result *= vignette;
+    }
 
     // Film Grain
     if (uGrain > 0.0) {
@@ -235,11 +242,12 @@ void main() {
         result += noise;
     }
 
-    gl_FragColor = vec4(clamp(result, 0.0, 1.0), color.a);
+    // Safe Clamp (避免画面死黑死白)
+    gl_FragColor = vec4(clamp(result, 0.001, 0.999), color.a);
 }
 )";
 
-// Outline Shader (Pure Black Overlay)
+// Outline Shader (Pure Black Overlay, NO STYLE CHANGE)
 const char* g_frag_outline = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -878,7 +886,7 @@ static void DrawUI() {
             ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f");
             
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Vignette");
+            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Vignette (Black Edge)");
             ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f");
 
             ImGui::Dummy(ImVec2(0, 8));
