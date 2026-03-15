@@ -15,7 +15,7 @@ jobs:
       - uses: nttld/setup-ndk@v1
         id: ndk
         with:
-          ndk-version: r25c
+          ndk-version: r23b # 关键修改：从 r25c 降回 r23b，适配 libGlossHook.a
 
       - name: Build
         run: |
@@ -30,4 +30,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: libRenderFusion
-          path: build/output/libRenderFusion.so # 已更新路径，匹配 CMake 配置
+          path: build/output/libRenderFusion.so
