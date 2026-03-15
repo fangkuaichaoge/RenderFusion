@@ -29,5 +29,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: libRenderFusion          # 这里改名
-          path: build/libRenderFusion.so # 这里也对应改名
+          name: libRenderFusion
+          path: build/output/libRenderFusion.so # 已更新路径，匹配 CMake 配置
