@@ -109,24 +109,14 @@ namespace RF {
         Preset presets[] = {
             // Original: 完全无修改，无黑边，无滤镜
             {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            // Fresh & Clean: 轻微提亮，极低暗角，不发黑
-            {"Fresh & Clean", {true, 0.08f, 1.08f, 1.12f, 0.08f, 0.1f, false, false, 0.0f, 0.03f, false, 0.25f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            // Vintage Film: 修复过暗问题，提升亮度，降低暗角，保留复古感不发黑
-            {"Vintage Film", {true, 0.06f, 1.03f, 0.88f, -0.12f, 0.18f, false, true, 0.55f, 0.1f, false, 0.2f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
             // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
             {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
-            // Cinematic: 轻微提亮，降低暗角，避免画面发黑
-            {"Cinematic", {true, 0.0f, 1.12f, 0.98f, -0.08f, 0.2f, false, false, 0.0f, 0.02f, false, 0.35f, false, 0.15f, 1.0f, true, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
+            // Cinematic: 电影感色调，默认关闭景深
+            {"Cinematic", {true, 0.02f, 1.1f, 0.95f, -0.06f, 0.15f, false, false, 0.0f, 0.015f, false, 0.3f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.12f, 1.5f, 0.15f, 0.02f}}
         };
         
-        if (idx >= 0 && idx < 5) {
-            bool dof_was_on = params.enable_dof;
-            ImVec2 prev_focus = params.focus_point;
+        if (idx >= 0 && idx < 3) {
             params = presets[idx].p;
-            if (dof_was_on && !params.enable_dof) {
-                params.enable_dof = true;
-                params.focus_point = prev_focus;
-            }
         }
     }
 
@@ -186,6 +176,60 @@ uniform vec2 uTexelSize;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
+// HSV 转换
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+// 漫画风格黑白 - 基于色调和饱和度的智能判定
+float mangaGray(vec3 color) {
+    vec3 hsv = rgb2hsv(color);
+    float hue = hsv.x;        // 色调 0-1
+    float sat = hsv.y;        // 饱和度 0-1
+    float val = hsv.z;        // 明度 0-1
+    
+    // 基础灰度
+    float gray = dot(color, vec3(0.299, 0.587, 0.114));
+    
+    // 根据色调调整：暖色（红橙黄）稍亮，冷色（蓝紫）稍暗
+    // hue: 0=红, 0.16=黄, 0.33=绿, 0.5=青, 0.66=蓝, 0.83=紫
+    float warmth = 0.0;
+    if (hue < 0.17) {
+        // 红到黄：暖色，提亮
+        warmth = 0.15 * (1.0 - abs(hue - 0.08) / 0.08);
+    } else if (hue > 0.58 && hue < 0.75) {
+        // 蓝到青：冷色，压暗
+        warmth = -0.1 * (1.0 - abs(hue - 0.66) / 0.08);
+    } else if (hue > 0.8) {
+        // 紫色：中性偏暗
+        warmth = -0.05;
+    }
+    
+    // 高饱和度区域：增强对比，让颜色更分明
+    // 低饱和度区域：保持原样
+    float satBoost = sat * 0.1;
+    
+    // 综合灰度值
+    gray = gray + warmth + satBoost;
+    
+    // 高对比度处理
+    gray = (gray - 0.5) * 1.6 + 0.5;
+    
+    // 色调分离 - 4色阶更细腻的漫画效果
+    float levels = 4.0;
+    gray = floor(gray * levels + 0.5) / levels;
+    
+    // 最终平滑处理
+    gray = smoothstep(0.15, 0.85, gray);
+    
+    return clamp(gray, 0.0, 1.0);
+}
+
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
@@ -218,18 +262,9 @@ void main() {
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
     result = mix(vec3(gray), result, uSaturation);
 
-    // Black & White - MANGA STYLE (高对比度纯黑纯白)
+    // Black & White - MANGA STYLE (智能色调判定)
     if (uEnableBW == 1) {
-        // 1. 先转灰度
-        gray = dot(result, vec3(0.299, 0.587, 0.114));
-        // 2. 高对比度增强
-        gray = (gray - 0.5) * 1.8 + 0.5;
-        // 3. 色调分离：将灰度映射到有限的黑白色阶，实现漫画效果
-        // 使用 3 个色阶：纯黑、中灰、纯白
-        float levels = 3.0;
-        gray = floor(gray * levels + 0.5) / levels;
-        // 4. 最终增强对比，确保纯黑纯白
-        gray = smoothstep(0.2, 0.8, gray);
+        gray = mangaGray(result);
         result = vec3(gray);
     }
 
@@ -821,32 +856,54 @@ static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    ImVec4 bg_dark(0.10f, 0.10f, 0.10f, 0.98f);
-    ImVec4 bg_medium(0.15f, 0.15f, 0.15f, 1.0f);
-    ImVec4 gold(0.85f, 0.70f, 0.30f, 1.0f);
-    ImVec4 text_main(0.95f, 0.95f, 0.95f, 1.0f);
+    // 现代深色主题配色
+    ImVec4 bg_dark(0.08f, 0.08f, 0.10f, 0.96f);
+    ImVec4 bg_medium(0.12f, 0.12f, 0.15f, 1.0f);
+    ImVec4 bg_light(0.18f, 0.18f, 0.22f, 1.0f);
+    ImVec4 accent(0.40f, 0.75f, 0.95f, 1.0f);      // 青蓝色主题色
+    ImVec4 accent_hover(0.50f, 0.85f, 1.0f, 1.0f);
+    ImVec4 accent_active(0.30f, 0.65f, 0.85f, 1.0f);
+    ImVec4 text_main(0.95f, 0.95f, 0.97f, 1.0f);
+    ImVec4 text_dim(0.60f, 0.60f, 0.65f, 1.0f);
 
     c[ImGuiCol_WindowBg] = bg_dark;
-    c[ImGuiCol_ChildBg] = bg_medium;
-    c[ImGuiCol_TitleBgActive] = ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
-    c[ImGuiCol_FrameBg] = ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
-    c[ImGuiCol_Button] = ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.30f, 0.30f, 1.0f);
-    c[ImGuiCol_ButtonActive] = gold;
-    c[ImGuiCol_SliderGrab] = gold;
-    c[ImGuiCol_SliderGrabActive] = ImVec4(0.95f, 0.80f, 0.40f, 1.0f);
-    c[ImGuiCol_CheckMark] = gold;
+    c[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.10f, 0.13f, 1.0f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.16f, 1.0f);
+    c[ImGuiCol_FrameBg] = bg_light;
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.22f, 0.28f, 1.0f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.28f, 0.35f, 1.0f);
+    c[ImGuiCol_Button] = bg_light;
+    c[ImGuiCol_ButtonHovered] = accent;
+    c[ImGuiCol_ButtonActive] = accent_active;
+    c[ImGuiCol_SliderGrab] = accent;
+    c[ImGuiCol_SliderGrabActive] = accent_hover;
+    c[ImGuiCol_CheckMark] = accent;
     c[ImGuiCol_Text] = text_main;
-    c[ImGuiCol_Header] = ImVec4(0.15f, 0.15f, 0.15f, 1.0f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
-    c[ImGuiCol_HeaderActive] = ImVec4(0.85f, 0.70f, 0.30f, 0.5f);
+    c[ImGuiCol_TextDisabled] = text_dim;
+    c[ImGuiCol_Header] = bg_light;
+    c[ImGuiCol_HeaderHovered] = accent;
+    c[ImGuiCol_HeaderActive] = accent_active;
+    c[ImGuiCol_Tab] = bg_medium;
+    c[ImGuiCol_TabHovered] = accent;
+    c[ImGuiCol_TabActive] = accent_active;
+    c[ImGuiCol_TabUnfocused] = bg_medium;
+    c[ImGuiCol_TabUnfocusedActive] = bg_light;
+    c[ImGuiCol_Separator] = ImVec4(0.25f, 0.25f, 0.30f, 1.0f);
+    c[ImGuiCol_Border] = ImVec4(0.20f, 0.20f, 0.25f, 0.8f);
 
-    s.WindowRounding = 16.0f;
-    s.ChildRounding = 12.0f;
-    s.FrameRounding = 8.0f;
+    s.WindowRounding = 20.0f;
+    s.ChildRounding = 14.0f;
+    s.FrameRounding = 10.0f;
+    s.GrabRounding = 8.0f;
+    s.TabRounding = 10.0f;
     s.WindowPadding = ImVec2(0, 0);
-    s.FramePadding = ImVec2(12, 10);
-    s.ItemSpacing = ImVec2(10, 8);
+    s.FramePadding = ImVec2(14, 8);
+    s.ItemSpacing = ImVec2(10, 6);
+    s.ItemInnerSpacing = ImVec2(8, 6);
+    s.WindowBorderSize = 1.0f;
+    s.ChildBorderSize = 0.0f;
+    s.ScrollbarRounding = 12.0f;
+    s.ScrollbarSize = 12.0f;
 }
 
 // ==========================================
@@ -856,70 +913,48 @@ static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
     ImGuiIO& io = ImGui::GetIO();
 
-    // Floating Button
+    // Floating Button - 更精致的设计
     if (!g_ShowUI) {
         ImGui::SetNextWindowPos(ImVec2(20, io.DisplaySize.y * 0.5f), ImGuiCond_Always);
-        ImGui::Begin("##Reopen", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 50.0f);
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.70f, 0.30f, 1.0f));
-        if (ImGui::Button("RF", ImVec2(75, 75))) g_ShowUI = true;
-        ImGui::PopStyleColor();
+        ImGui::Begin("##Reopen", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 40.0f);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.40f, 0.75f, 0.95f, 0.95f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.50f, 0.85f, 1.0f, 1.0f));
+        if (ImGui::Button(" RF ", ImVec2(60, 60))) g_ShowUI = true;
+        ImGui::PopStyleColor(2);
         ImGui::PopStyleVar();
         ImGui::End();
         if (g_UIFont) ImGui::PopFont();
         return;
     }
 
-    // Main Window
-    ImGui::SetNextWindowSize(ImVec2(520, 680), ImGuiCond_FirstUseEver);
+    // Main Window - 更紧凑的尺寸
+    ImGui::SetNextWindowSize(ImVec2(480, 600), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
 
-    // Header
     ImVec2 win_size = ImGui::GetWindowSize();
-    ImGui::SetCursorPos(ImVec2(16, 12));
-    ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "Universal Filters");
     
-    ImGui::SameLine(win_size.x - 60);
-    ImGui::SetCursorPosY(12);
-    if (ImGui::Button("X", ImVec2(36, 36))) g_ShowUI = false;
+    // Header with darker background
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y),
+        ImVec2(ImGui::GetWindowPos().x + win_size.x, ImGui::GetWindowPos().y + 50),
+        IM_COL32(15, 15, 20, 255)
+    );
     
-    ImGui::SetCursorPosY(52);
-    ImGui::Separator();
-
-    // Layout: Presets + Controls
-    ImGui::SetCursorPosY(60);
-    ImGui::BeginChild("MainLayout", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
+    ImGui::SetCursorPos(ImVec2(20, 14));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
+    ImGui::TextUnformatted("RenderFusion");
+    ImGui::PopStyleColor();
     
-    // Left: Preset List
-    ImGui::BeginChild("Presets", ImVec2(160, 0), true, ImGuiWindowFlags_NoBackground);
-    ImGui::SetCursorPos(ImVec2(12, 12));
-    ImGui::TextColored(ImVec4(0.85f, 0.70f, 0.30f, 1.0f), "Custom");
-    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::SameLine(win_size.x - 56);
+    ImGui::SetCursorPosY(10);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    if (ImGui::Button(" X ", ImVec2(36, 32))) g_ShowUI = false;
+    ImGui::PopStyleVar();
     
-    const char* preset_names[] = {"Original", "Fresh & Clean", "Vintage Film", "Manga B&W", "Cinematic"};
-    for (int i = 0; i < 5; i++) {
-        bool is_selected = (RF::current_preset == i);
-        if (is_selected) {
-            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.85f, 0.70f, 0.30f, 0.3f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.70f, 0.30f, 1.0f));
-        }
-        
-        if (ImGui::Selectable(preset_names[i], is_selected, ImGuiSelectableFlags_SpanAllColumns, ImVec2(0, 36))) {
-            RF::current_preset = i;
-            RF::ApplyPreset(i);
-        }
-        
-        if (is_selected) ImGui::PopStyleColor(2);
-    }
-    ImGui::EndChild();
-    
-    ImGui::SameLine();
-    
-    // Right: Controls
-    ImGui::BeginChild("Controls", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
-    ImGui::SetCursorPos(ImVec2(16, 12));
+    ImGui::SetCursorPosY(54);
 
     // Focus point click logic
     if (RF::focus_pending && io.MouseClicked[0] && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
@@ -927,35 +962,74 @@ static void DrawUI() {
         RF::focus_pending = false;
     }
 
-    if (ImGui::BeginTabBar("ControlTabs")) {
+    // 主内容区
+    ImGui::BeginChild("MainContent", ImVec2(0, -55), false, ImGuiWindowFlags_NoBackground);
+
+    // 预设按钮 - 横向排列
+    ImGui::SetCursorPosX(16);
+    ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Presets");
+    ImGui::Dummy(ImVec2(0, 6));
+    
+    ImGui::SetCursorPosX(16);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 0));
+    
+    const char* preset_names[] = {"Original", "Manga B&W", "Cinematic"};
+    for (int i = 0; i < 3; i++) {
+        bool is_selected = (RF::current_preset == i);
+        if (is_selected) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.18f, 0.22f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.70f, 0.75f, 1.0f));
+        }
+        
+        if (ImGui::Button(preset_names[i], ImVec2(138, 36))) {
+            RF::current_preset = i;
+            RF::ApplyPreset(i);
+        }
+        
+        ImGui::PopStyleColor(2);
+        if (i < 2) ImGui::SameLine();
+    }
+    ImGui::PopStyleVar(2);
+    
+    ImGui::Dummy(ImVec2(0, 16));
+
+    // Tabs 区域
+    ImGui::BeginChild("TabsArea", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
+    
+    if (ImGui::BeginTabBar("ControlTabs", ImGuiTabBarFlags_None)) {
         // Adjust Tab
         if (ImGui::BeginTabItem("Adjust")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Enable Adjustment", &RF::params.enable_master);
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::PushItemWidth(-1);
+            ImGui::Checkbox("Enable", &RF::params.enable_master);
+            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::PushItemWidth(-20);
             
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Temperature");
-            ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f");
-            
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Saturation");
-            ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f");
-            
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Contrast");
-            ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f");
-            
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Brightness");
+            // 紧凑的滑块布局
+            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Brightness");
             ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f");
+            ImGui::Dummy(ImVec2(0, 4));
             
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Vignette (Black Edge)");
+            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Contrast");
+            ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f");
+            ImGui::Dummy(ImVec2(0, 4));
+            
+            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Saturation");
+            ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f");
+            ImGui::Dummy(ImVec2(0, 4));
+            
+            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Temperature");
+            ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f");
+            ImGui::Dummy(ImVec2(0, 4));
+            
+            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Vignette");
             ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f");
-
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.0f), "Film Grain");
+            ImGui::Dummy(ImVec2(0, 4));
+            
+            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Film Grain");
             ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f");
             
             ImGui::PopItemWidth();
@@ -965,30 +1039,31 @@ static void DrawUI() {
         // Stylize Tab
         if (ImGui::BeginTabItem("Stylize")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Manga B&W (Comic Style)", &RF::params.enable_bw);
+            
+            // Manga B&W
+            ImGui::Checkbox("Manga B&W", &RF::params.enable_bw);
             if (RF::params.enable_bw) {
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "High contrast B&W with posterization");
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tip: Enable Outline below for manga effect!");
+                ImGui::TextColored(ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "Comic-style high contrast B&W");
             }
             
             ImGui::Dummy(ImVec2(0, 8));
+            
+            // Sepia
             ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia);
-            
             if (RF::params.enable_sepia) {
-                ImGui::Dummy(ImVec2(0, 4));
-                ImGui::PushItemWidth(-1);
-                ImGui::SliderFloat("Sepia Intensity", &RF::params.sepia_intensity, 0.0f, 1.0f, "%.2f");
-                ImGui::PopItemWidth();
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "Intensity: %.2f");
             }
             
             ImGui::Dummy(ImVec2(0, 8));
+            
+            // Outline
             ImGui::Checkbox("Black Outline", &RF::params.enable_outline);
             if (RF::params.enable_outline) {
-                ImGui::Dummy(ImVec2(0, 4));
-                ImGui::PushItemWidth(-1);
-                ImGui::SliderFloat("Outline Threshold", &RF::params.outline_thresh, 0.05f, 0.5f, "%.2f");
-                ImGui::SliderFloat("Outline Opacity", &RF::params.outline_opacity, 0.0f, 1.0f, "%.2f");
-                ImGui::PopItemWidth();
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Threshold: %.2f");
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f");
             }
 
             ImGui::EndTabItem();
@@ -999,33 +1074,35 @@ static void DrawUI() {
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen);
             if (RF::params.enable_sharpen) {
-                ImGui::Dummy(ImVec2(0, 4));
-                ImGui::PushItemWidth(-1);
-                ImGui::SliderFloat("Sharpness Intensity", &RF::params.sharpen_intensity, 0.0f, 1.5f, "%.2f");
-                ImGui::PopItemWidth();
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f");
             }
             ImGui::EndTabItem();
         }
 
-        // Bokeh DOF Tab
-        if (ImGui::BeginTabItem("Bokeh DOF")) {
+        // DOF Tab
+        if (ImGui::BeginTabItem("DOF")) {
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::Checkbox("Enable Depth of Field", &RF::params.enable_dof);
             
             if (RF::params.enable_dof) {
-                ImGui::Dummy(ImVec2(0, 8));
-                if (ImGui::Button(RF::focus_pending ? "Tap Screen to Set Focus!" : "Set Focus Point", ImVec2(-1, 40))) {
+                ImGui::Dummy(ImVec2(0, 6));
+                ImGui::PushStyleColor(ImGuiCol_Button, RF::focus_pending ? ImVec4(0.90f, 0.50f, 0.40f, 1.0f) : ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
+                if (ImGui::Button(RF::focus_pending ? "Tap Screen!" : "Set Focus Point", ImVec2(-1, 36))) {
                     RF::focus_pending = !RF::focus_pending;
                 }
-                ImGui::Text("Current Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
+                ImGui::PopStyleColor();
+                ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
                 
                 ImGui::Dummy(ImVec2(0, 8));
-                ImGui::PushItemWidth(-1);
-                ImGui::SliderFloat("Clear Radius", &RF::params.focus_radius, 0.05f, 0.5f, "%.2f");
-                ImGui::SliderFloat("Transition Softness", &RF::params.transition, 0.05f, 0.5f, "%.2f");
-                ImGui::SliderFloat("Blur Strength", &RF::params.blur_strength, 0.0f, 3.0f, "%.2f");
-                ImGui::SliderFloat("Chromatic Aberration", &RF::params.chromatic, 0.0f, 0.1f, "%.3f");
-                ImGui::PopItemWidth();
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##FocusRadius", &RF::params.focus_radius, 0.05f, 0.5f, "Radius: %.2f");
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##Transition", &RF::params.transition, 0.05f, 0.5f, "Softness: %.2f");
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##BlurStr", &RF::params.blur_strength, 0.0f, 3.0f, "Blur: %.2f");
+                ImGui::SetNextItemWidth(-20);
+                ImGui::SliderFloat("##Chromatic", &RF::params.chromatic, 0.0f, 0.1f, "Chromatic: %.3f");
             }
             ImGui::EndTabItem();
         }
@@ -1033,18 +1110,19 @@ static void DrawUI() {
         ImGui::EndTabBar();
     }
 
-    // Reset Button
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 60);
-    ImGui::Separator();
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 52);
-    ImGui::SetCursorPosX(ImGui::GetWindowWidth() * 0.5f - 60);
-    if (ImGui::Button("Reset All", ImVec2(120, 40))) {
+    ImGui::EndChild();
+    ImGui::EndChild();
+
+    // Bottom Reset Button
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 48);
+    ImGui::SetCursorPosX((win_size.x - 120) * 0.5f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    if (ImGui::Button("Reset All", ImVec2(120, 34))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
     }
+    ImGui::PopStyleVar();
 
-    ImGui::EndChild();
-    ImGui::EndChild();
     ImGui::End();
     
     if (g_UIFont) ImGui::PopFont();
