@@ -58,11 +58,14 @@ namespace RF {
     GLuint prog_gaussian = 0;   // 高斯模糊
     GLuint prog_dof = 0;        // 景深
     // Art Style Shaders
-    GLuint prog_cel = 0;        // 赛璐璐
-    GLuint prog_ink = 0;        // 水墨
-    GLuint prog_painting = 0;   // 彩绘
-    GLuint prog_oil = 0;        // 油画
-    GLuint prog_sketch = 0;     // 素描
+        GLuint prog_cel = 0;         // 赛璐璐卡通
+        GLuint prog_chinese = 0;     // 中国画
+        GLuint prog_watercolor = 0;  // 透明水彩
+        GLuint prog_oil = 0;         // 油画
+        GLuint prog_sketch = 0;      // 素描
+        GLuint prog_anime = 0;       // 二次元动漫
+        GLuint prog_comic = 0;       // 美漫画
+        GLuint prog_marker = 0;      // 马克笔
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -102,8 +105,8 @@ namespace RF {
         float transition = 0.2f;
         float chromatic = 0.0f;
         
-        // Art Style (0=Off, 1=Cel, 2=Ink, 3=Painting, 4=Oil, 5=Sketch)
-        int art_style = 0;
+        // Art Styles
+        int art_style = 0;      // 0=Off, 1=Cel Anime, 2=Chinese Painting, 3=Transparent Watercolor, 4=Oil Paint, 5=Sketch, 6=Anime, 7=Comic, 8=Marker
         float art_intensity = 1.0f;
     };
     
@@ -389,10 +392,10 @@ void main() {
 )";
 
 // ==========================================
-// Art Style Shaders
+// Art Style Shaders (性能优化版)
 // ==========================================
 
-// 赛璐璐卡通画风 (Cel Shading)
+// 赛璐璐卡通画风 (Cel Shading) - 优化版
 const char* g_frag_cel = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -400,191 +403,156 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
 
-vec3 rgb2hsv(vec3 c) {
-    vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
-    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-    float d = q.x - min(q.w, q.y);
-    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1.0e-10)), d / (q.x + 1.0e-10), q.x);
-}
-
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
-    vec3 result = color.rgb;
     
-    // 色调分离 - 4-5 个色阶
-    vec3 hsv = rgb2hsv(result);
-    float levels = 5.0;
-    result = floor(result * levels) / levels;
+    // 快速边缘检测 (Sobel)
+    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c1 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c2 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c3 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
     
-    // 边缘检测用于描边
-    float gx = 0.0, gy = 0.0;
-    for(int i = -1; i <= 1; i++) {
-        for(int j = -1; j <= 1; j++) {
-            vec2 offset = vec2(float(i), float(j)) * uTexelSize;
-            float lum = dot(texture2D(uTexture, vTexCoord + offset).rgb, vec3(0.299, 0.587, 0.114));
-            gx += lum * float(i) * (abs(i) + abs(j) == 2 ? 1.0 : 2.0);
-            gy += lum * float(j) * (abs(i) + abs(j) == 2 ? 1.0 : 2.0);
-        }
-    }
+    float gx = -c0 + c1 - 2.0*c4 + 2.0*c5 - c2 + c3;
+    float gy = -c0 - 2.0*c6 - c1 + c2 + 2.0*c7 + c3;
     float edge = sqrt(gx*gx + gy*gy);
-    float outline = smoothstep(0.08, 0.15, edge);
+    float outline = smoothstep(0.06, 0.12, edge);
+    
+    // 5阶色调分离
+    vec3 result = floor(color.rgb * 4.99) / 4.0;
     
     // 饱和度提升
-    result = mix(vec3(dot(result, vec3(0.299, 0.587, 0.114))), result, 1.3);
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 1.25);
     
-    // 混合描边
-    result = mix(result, vec3(0.0), outline * 0.8);
+    // 描边
+    result = mix(result, vec3(0.0), outline * 0.9);
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
-// 水墨效果 (Ink Wash)
-const char* g_frag_ink = R"(
+// 中国画风格 (Chinese Painting) - 带颜色
+const char* g_frag_chinese = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
-uniform float uTime;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     
-    // 转灰度
+    // 中国画配色 - 青绿山水色调
+    vec3 inkColor = vec3(0.15, 0.25, 0.3); // 青墨色
+    
+    // 转灰度作为墨色深浅
     float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    gray = (gray - 0.5) * 1.5 + 0.5;
     
-    // 高对比度
-    gray = (gray - 0.5) * 1.8 + 0.5;
-    
-    // 水墨晕染效果 - 多次采样模拟墨水扩散
+    // 快速模糊采样 (3x3)
     float blur = 0.0;
-    for(int i = -2; i <= 2; i++) {
-        for(int j = -2; j <= 2; j++) {
-            vec2 offset = vec2(float(i), float(j)) * uTexelSize * 2.0;
-            float dist = length(vec2(float(i), float(j))) / 3.0;
-            blur += dot(texture2D(uTexture, vTexCoord + offset).rgb, vec3(0.299, 0.587, 0.114)) * (1.0 - dist * 0.3);
-        }
-    }
-    blur /= 25.0;
+    blur += dot(texture2D(uTexture, vTexCoord).rgb, vec3(0.299, 0.587, 0.114)) * 0.25;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.125;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.125;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.125;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.125;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.0625;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.0625;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.0625;
+    blur += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * 0.0625;
     
-    // 混合原始和模糊
-    gray = mix(gray, blur, 0.3);
-    
-    // 水墨纹理噪点
-    float noise = (random(vTexCoord * 100.0 + uTime * 0.1) - 0.5) * 0.1;
-    gray += noise;
-    
-    // 色调分离 - 4色阶水墨
-    gray = floor(gray * 4.0 + 0.5) / 4.0;
-    
-    // 边缘检测 - 毛笔描边效果
-    float gx = 0.0, gy = 0.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(0.0, -2.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(0.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(0.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(0.0,  2.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    
-    float edge = sqrt(gx*gx + gy*gy) * 0.5;
-    float outline = smoothstep(0.05, 0.2, edge);
-    gray = mix(gray, 0.0, outline * 0.9);
+    gray = mix(gray, blur, 0.4);
     
     // 宣纸底纹
-    float paper = random(vTexCoord * 200.0) * 0.05;
-    gray = gray * (1.0 - paper * 0.5);
+    float paper = random(vTexCoord * 180.0) * 0.08;
+    gray = gray * (1.0 - paper * 0.3) + paper * 0.15;
     
-    vec3 result = vec3(clamp(gray, 0.0, 1.0));
+    // 墨色分离
+    gray = floor(gray * 5.0) / 5.0;
+    
+    // 快速边缘检测
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float center = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    float edge = abs(c4 - c5) + abs(c6 - c7);
+    float outline = smoothstep(0.03, 0.12, edge);
+    
+    // 混合原色和墨色
+    vec3 result = mix(color.rgb, inkColor * gray + vec3(0.9, 0.87, 0.8) * (1.0 - gray), 0.7);
+    
+    // 淡淡保留原色高光
+    float highlight = smoothstep(0.7, 0.9, gray);
+    result = mix(result, color.rgb * 1.1, highlight * 0.3);
+    
+    // 笔触描边
+    result = mix(result, vec3(0.05, 0.08, 0.1), outline * 0.85);
+    
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
-// 彩绘风格 (Watercolor / Painting)
-const char* g_frag_painting = R"(
+// 透明水彩手绘风格 (Transparent Watercolor)
+const char* g_frag_watercolor = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
-uniform float uTime;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     
-    // Kuwahara 风格滤波 - 模拟笔触
-    vec3 avg[4];
-    vec3 var[4];
+    // 轻量模糊 - 水彩晕染
+    vec3 blur = color.rgb * 0.4;
+    blur += texture2D(uTexture, vTexCoord + vec2(-1.5, 0.0) * uTexelSize).rgb * 0.1;
+    blur += texture2D(uTexture, vTexCoord + vec2( 1.5, 0.0) * uTexelSize).rgb * 0.1;
+    blur += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.5) * uTexelSize).rgb * 0.1;
+    blur += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.5) * uTexelSize).rgb * 0.1;
+    blur += texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * uTexelSize).rgb * 0.05;
+    blur += texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * uTexelSize).rgb * 0.05;
+    blur += texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * uTexelSize).rgb * 0.05;
+    blur += texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * uTexelSize).rgb * 0.05;
     
-    for(int k = 0; k < 4; k++) {
-        avg[k] = vec3(0.0);
-        var[k] = vec3(0.0);
-    }
+    // 颜色淡化 - 透明水彩感
+    blur = blur * 0.85 + vec3(0.95, 0.95, 0.98) * 0.15;
     
-    vec2 offsets[4] = vec2[](vec2(-1,-1), vec2(1,-1), vec2(-1,1), vec2(1,1));
+    // 柔和色调分离
+    blur = floor(blur * 7.0 + 0.5) / 7.0;
     
-    for(int k = 0; k < 4; k++) {
-        int count = 0;
-        for(int i = 0; i <= 2; i++) {
-            for(int j = 0; j <= 2; j++) {
-                vec2 off = offsets[k] * vec2(float(i), float(j)) * uTexelSize * 2.0;
-                vec3 col = texture2D(uTexture, vTexCoord + off).rgb;
-                avg[k] += col;
-                var[k] += col * col;
-                count++;
-            }
-        }
-        avg[k] /= float(count);
-        var[k] = var[k] / float(count) - avg[k] * avg[k];
-    }
+    // 饱和度略微提升
+    float gray = dot(blur, vec3(0.299, 0.587, 0.114));
+    blur = mix(vec3(gray), blur, 1.15);
     
-    // 选择方差最小的区域
-    float minVar = 1e10;
-    vec3 result = color.rgb;
-    for(int k = 0; k < 4; k++) {
-        float v = dot(var[k], vec3(1.0));
-        if(v < minVar) {
-            minVar = v;
-            result = avg[k];
-        }
-    }
+    // 水彩边缘
+    float center = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float edge = abs(c4 - c5) + abs(c6 - c7);
     
-    // 饱和度增强
-    float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 1.4);
+    // 边缘加深（水彩特有的边缘积色）
+    blur *= 1.0 - smoothstep(0.02, 0.1, edge) * 0.3;
     
-    // 色调分离
-    result = floor(result * 8.0) / 8.0;
+    // 水彩纹理
+    float paper = random(vTexCoord * 120.0) * 0.06;
+    blur = blur * (1.0 + paper - 0.03);
     
-    // 水彩边缘柔化
-    float edge = 0.0;
-    for(int i = -1; i <= 1; i++) {
-        for(int j = -1; j <= 1; j++) {
-            vec2 off = vec2(float(i), float(j)) * uTexelSize;
-            edge += abs(dot(texture2D(uTexture, vTexCoord + off).rgb - color.rgb, vec3(0.299, 0.587, 0.114)));
-        }
-    }
-    edge /= 9.0;
-    
-    // 边缘加深
-    result *= 1.0 - edge * 0.5;
-    
-    // 纸张纹理
-    float paper = random(vTexCoord * 150.0 + uTime * 0.01) * 0.08;
-    result = result * (1.0 + paper - 0.04);
-    
-    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+    gl_FragColor = vec4(mix(color.rgb, blur, uIntensity), color.a);
 }
 )";
 
-// 油画风格 (Oil Painting)
+// 油画风格 (Oil Painting) - 简化版
 const char* g_frag_oil = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -595,59 +563,31 @@ uniform float uIntensity;
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     
-    // 油画滤波 - 基于强度的颜色量化
-    int bins = 8;
-    vec3 binColor[64];
-    int binCount[64];
+    // 简化的油画效果 - 均值滤波 + 颜色量化
+    vec3 sum = vec3(0.0);
+    float radius = 2.0;
     
-    for(int i = 0; i < 64; i++) {
-        binColor[i] = vec3(0.0);
-        binCount[i] = 0;
-    }
+    sum += color.rgb * 0.2;
+    sum += texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb * 0.1;
+    sum += texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb * 0.1;
+    sum += texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb * 0.1;
+    sum += texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb * 0.1;
+    sum += texture2D(uTexture, vTexCoord + vec2(-1.5,-1.5) * uTexelSize).rgb * 0.08;
+    sum += texture2D(uTexture, vTexCoord + vec2( 1.5,-1.5) * uTexelSize).rgb * 0.08;
+    sum += texture2D(uTexture, vTexCoord + vec2(-1.5, 1.5) * uTexelSize).rgb * 0.08;
+    sum += texture2D(uTexture, vTexCoord + vec2( 1.5, 1.5) * uTexelSize).rgb * 0.08;
     
-    // 采样区域
-    int radius = 3;
-    for(int i = -radius; i <= radius; i++) {
-        for(int j = -radius; j <= radius; j++) {
-            vec2 off = vec2(float(i), float(j)) * uTexelSize;
-            vec3 col = texture2D(uTexture, vTexCoord + off).rgb;
-            
-            // 量化到 bin
-            int r = int(col.r * float(bins - 1));
-            int g = int(col.g * float(bins - 1));
-            int b = int(col.b * float(bins - 1));
-            int idx = r * 16 + g * 4 + b;
-            idx = clamp(idx, 0, 63);
-            
-            binColor[idx] += col;
-            binCount[idx]++;
-        }
-    }
+    // 粗色调分离
+    vec3 result = floor(sum * 5.0 + 0.5) / 5.0;
     
-    // 找到最大计数的 bin
-    int maxIdx = 0;
-    int maxCount = 0;
-    for(int i = 0; i < 64; i++) {
-        if(binCount[i] > maxCount) {
-            maxCount = binCount[i];
-            maxIdx = i;
-        }
-    }
-    
-    vec3 result = binColor[maxIdx] / float(maxCount > 0 ? maxCount : 1);
-    
-    // 增强对比度和饱和度
+    // 饱和度和对比度
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 1.3);
-    result = (result - 0.5) * 1.2 + 0.5;
+    result = mix(vec3(gray), result, 1.2);
+    result = (result - 0.5) * 1.1 + 0.5;
     
-    // 油画笔触纹理
-    float stroke = 0.0;
-    for(int i = -2; i <= 2; i++) {
-        vec2 off = vec2(float(i), 0.0) * uTexelSize * 3.0;
-        stroke += dot(texture2D(uTexture, vTexCoord + off).rgb, vec3(0.299, 0.587, 0.114)) * 0.2;
-    }
-    result *= 0.95 + stroke * 0.1;
+    // 笔触纹理
+    float stroke = fract(vTexCoord.x * 40.0 + vTexCoord.y * 20.0) * 0.1;
+    result *= 1.0 - stroke * 0.15;
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
@@ -660,61 +600,184 @@ varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
-uniform float uTime;
+
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    
+    // Sobel 边缘
+    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c1 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c2 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c3 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    
+    float gx = -c0 + c1 - 2.0*c4 + 2.0*c5 - c2 + c3;
+    float gy = -c0 - 2.0*c6 - c1 + c2 + 2.0*c7 + c3;
+    float edge = sqrt(gx*gx + gy*gy);
+    
+    // 铅笔线条
+    float lines = 1.0 - smoothstep(0.0, 0.35, edge);
+    
+    // 斜线阴影
+    vec2 uv = vTexCoord * 150.0;
+    float pattern1 = step(0.5, fract(uv.x + uv.y));
+    float pattern2 = step(0.5, fract(uv.x - uv.y));
+    
+    float hatch = 0.0;
+    if(gray < 0.65) hatch += pattern1 * 0.25 * (0.65 - gray) / 0.65;
+    if(gray < 0.45) hatch += pattern2 * 0.35 * (0.45 - gray) / 0.45;
+    if(gray < 0.25) hatch += 0.4 * (0.25 - gray) / 0.25;
+    
+    // 纸张纹理
+    float paper = random(vTexCoord * 250.0) * 0.1;
+    
+    float result = lines - hatch + paper * 0.4;
+    result = clamp(result, 0.0, 1.0);
+    
+    // 暖色铅笔
+    vec3 pencil = vec3(result * 0.97, result * 0.95, result * 0.9);
+    
+    gl_FragColor = vec4(mix(color.rgb, pencil, uIntensity), color.a);
+}
+)";
+
+// 二次元动漫风格 (Anime Style)
+const char* g_frag_anime = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uIntensity;
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    
+    // 高饱和度 + 高对比度
+    float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    vec3 result = mix(vec3(gray), color.rgb, 1.35);
+    result = (result - 0.5) * 1.15 + 0.5;
+    
+    // 平滑色调分离 (6阶)
+    result = floor(result * 5.99) / 6.0;
+    
+    // 快速边缘检测
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float center = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    
+    float edge = abs(c4 - c5) + abs(c6 - c7);
+    float outline = smoothstep(0.03, 0.08, edge);
+    
+    // 深色描边
+    result = mix(result, vec3(0.1, 0.1, 0.15), outline * 0.85);
+    
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+}
+)";
+
+// 美漫画风格 (Comic Book Style)
+const char* g_frag_comic = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uIntensity;
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    
+    // 高对比度
+    vec3 result = (color.rgb - 0.5) * 1.5 + 0.5;
+    
+    // 强色调分离 (4阶)
+    result = floor(result * 3.99) / 4.0;
+    
+    // 饱和度提升
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 1.4);
+    
+    // 半色调点阵效果 (漫画印刷)
+    vec2 dotUV = vTexCoord * 100.0;
+    float dotPattern = step(0.5, distance(fract(dotUV), vec2(0.5)));
+    float luminance = dot(result, vec3(0.299, 0.587, 0.114));
+    dotPattern *= smoothstep(0.3, 0.7, luminance);
+    result *= 1.0 - dotPattern * 0.15;
+    
+    // 粗黑描边
+    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c1 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c2 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c3 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    
+    float gx = -c0 + c1 - 2.0*c4 + 2.0*c5 - c2 + c3;
+    float gy = -c0 - 2.0*c6 - c1 + c2 + 2.0*c7 + c3;
+    float edge = sqrt(gx*gx + gy*gy);
+    float outline = smoothstep(0.05, 0.15, edge);
+    
+    result = mix(result, vec3(0.0), outline * 0.95);
+    
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+}
+)";
+
+// 马克笔手绘风格 (Marker Style)
+const char* g_frag_marker = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uIntensity;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     
-    // 转灰度
-    float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    // 马克笔特有的半透明叠色效果
+    vec3 result = color.rgb;
     
-    // 反色用于素描效果
-    float invGray = 1.0 - gray;
+    // 轻微模糊模拟笔触融合
+    result += texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb * 0.08;
+    result += texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb * 0.08;
+    result += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb * 0.08;
+    result += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb * 0.08;
+    result /= 1.32;
     
-    // Sobel 边缘检测
-    float gx = 0.0, gy = 0.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gx += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
+    // 高饱和度 (马克笔鲜艳)
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 1.3);
     
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) * -1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  2.0;
-    gy += dot(texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114)) *  1.0;
+    // 色调分离 (6阶)
+    result = floor(result * 5.99) / 6.0;
     
-    float edge = sqrt(gx*gx + gy*gy);
+    // 马克笔笔触纹理
+    float stroke = random(vec2(floor(vTexCoord.x * 80.0), floor(vTexCoord.y * 80.0))) * 0.12;
+    result *= 1.0 - stroke;
     
-    // 铅笔线条效果
-    float lines = 1.0 - smoothstep(0.0, 0.3, edge);
+    // 边缘
+    float c4 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float edge = abs(c4 - c5) + abs(c6 - c7);
+    float outline = smoothstep(0.03, 0.1, edge);
     
-    // 纸张纹理
-    float paper = random(vTexCoord * 300.0) * 0.15;
+    // 细描边
+    result = mix(result, vec3(0.15, 0.12, 0.1), outline * 0.7);
     
-    // 素描阴影 - 根据亮度添加斜线阴影
-    float hatch = 0.0;
-    vec2 uv = vTexCoord * 200.0;
-    float pattern1 = step(0.5, fract(uv.x + uv.y));
-    float pattern2 = step(0.5, fract(uv.x - uv.y));
-    
-    if(gray < 0.6) hatch = mix(0.0, pattern1 * 0.3, (0.6 - gray) / 0.6);
-    if(gray < 0.4) hatch = mix(hatch, pattern2 * 0.5, (0.4 - gray) / 0.4);
-    if(gray < 0.2) hatch = mix(hatch, 0.8, (0.2 - gray) / 0.2);
-    
-    // 组合效果
-    float result = lines - hatch + paper * 0.5;
-    result = clamp(result, 0.0, 1.0);
-    
-    // 略微偏暖的铅笔色调
-    vec3 pencil = vec3(result * 0.95, result * 0.93, result * 0.88);
-    
-    gl_FragColor = vec4(mix(color.rgb, pencil, uIntensity), color.a);
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
@@ -891,13 +954,13 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_cel = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_cel));
     }
-    if (RF::prog_ink == 0) {
+    if (RF::prog_chinese == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_ink = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_ink));
+        RF::prog_chinese = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_chinese));
     }
-    if (RF::prog_painting == 0) {
+    if (RF::prog_watercolor == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_painting = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_painting));
+        RF::prog_watercolor = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_watercolor));
     }
     if (RF::prog_oil == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
@@ -906,6 +969,18 @@ void InitFilterResources(int w, int h) {
     if (RF::prog_sketch == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_sketch = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_sketch));
+    }
+    if (RF::prog_anime == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_anime = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_anime));
+    }
+    if (RF::prog_comic == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_comic = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_comic));
+    }
+    if (RF::prog_marker == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_marker = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_marker));
     }
 
     // Check if shaders are valid
@@ -1135,10 +1210,13 @@ void RenderFilters(int w, int h) {
         GLuint prog = 0;
         switch (RF::params.art_style) {
             case 1: prog = RF::prog_cel; break;
-            case 2: prog = RF::prog_ink; break;
-            case 3: prog = RF::prog_painting; break;
+            case 2: prog = RF::prog_chinese; break;
+            case 3: prog = RF::prog_watercolor; break;
             case 4: prog = RF::prog_oil; break;
             case 5: prog = RF::prog_sketch; break;
+            case 6: prog = RF::prog_anime; break;
+            case 7: prog = RF::prog_comic; break;
+            case 8: prog = RF::prog_marker; break;
         }
         
         if (prog != 0) {
@@ -1440,7 +1518,7 @@ static void DrawUI() {
             
             // Art Style
             ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Art Style");
-            const char* art_styles[] = {"Off", "Cel Anime", "Ink Wash", "Watercolor", "Oil Paint", "Sketch"};
+            const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Transparent Watercolor", "Oil Paint", "Sketch", "Anime", "Comic", "Marker"};
             ImGui::SetNextItemWidth(-20);
             if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
                 // 切换艺术风格时重置强度
