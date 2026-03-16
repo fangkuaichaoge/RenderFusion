@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 // ===================== Project Header Files =====================
 #include "pl/Hook.h"
@@ -137,6 +139,118 @@ namespace RF {
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
         return params.enable_outline || params.enable_dof;
+    }
+}
+
+// ===================== Configuration File Support =====================
+namespace Config {
+    // Path for configuration file
+    const char* CONFIG_PATH = "/storage/emulated/0/games/RenderFusion/config.json";
+    
+    // Ensure directory exists
+    void EnsureConfigDir() {
+        // Create directory if it doesn't exist
+        system("mkdir -p /storage/emulated/0/games/RenderFusion");
+    }
+    
+    // Load configuration from file
+    bool LoadConfig() {
+        std::ifstream file(CONFIG_PATH);
+        if (!file.is_open()) {
+            LOGI("Config file not found: %s", CONFIG_PATH);
+            return false;
+        }
+        
+        nlohmann::json j;
+        try {
+            file >> j;
+            file.close();
+        } catch (const std::exception& e) {
+            LOGE("Error parsing config file: %s", e.what());
+            file.close();
+            return false;
+        }
+        
+        LOGI("Loading configuration from: %s", CONFIG_PATH);
+        
+        // Load all filter parameters from config
+        if (j.contains("enable_master")) RF::params.enable_master = j["enable_master"];
+        if (j.contains("brightness")) RF::params.brightness = j["brightness"];
+        if (j.contains("contrast")) RF::params.contrast = j["contrast"];
+        if (j.contains("saturation")) RF::params.saturation = j["saturation"];
+        if (j.contains("temperature")) RF::params.temperature = j["temperature"];
+        if (j.contains("vignette")) RF::params.vignette = j["vignette"];
+        if (j.contains("enable_bw")) RF::params.enable_bw = j["enable_bw"];
+        if (j.contains("enable_sepia")) RF::params.enable_sepia = j["enable_sepia"];
+        if (j.contains("sepia_intensity")) RF::params.sepia_intensity = j["sepia_intensity"];
+        if (j.contains("film_grain")) RF::params.film_grain = j["film_grain"];
+        if (j.contains("enable_sharpen")) RF::params.enable_sharpen = j["enable_sharpen"];
+        if (j.contains("sharpen_intensity")) RF::params.sharpen_intensity = j["sharpen_intensity"];
+        if (j.contains("enable_outline")) RF::params.enable_outline = j["enable_outline"];
+        if (j.contains("outline_thresh")) RF::params.outline_thresh = j["outline_thresh"];
+        if (j.contains("outline_opacity")) RF::params.outline_opacity = j["outline_opacity"];
+        if (j.contains("enable_dof")) RF::params.enable_dof = j["enable_dof"];
+        if (j.contains("focus_point_x")) RF::params.focus_point.x = j["focus_point_x"];
+        if (j.contains("focus_point_y")) RF::params.focus_point.y = j["focus_point_y"];
+        if (j.contains("focus_radius")) RF::params.focus_radius = j["focus_radius"];
+        if (j.contains("blur_strength")) RF::params.blur_strength = j["blur_strength"];
+        if (j.contains("transition")) RF::params.transition = j["transition"];
+        if (j.contains("chromatic")) RF::params.chromatic = j["chromatic"];
+        if (j.contains("art_style")) RF::params.art_style = j["art_style"];
+        if (j.contains("art_intensity")) RF::params.art_intensity = j["art_intensity"];
+        if (j.contains("enable_tiktok")) RF::params.enable_tiktok = j["enable_tiktok"];
+        if (j.contains("tiktok_offset")) RF::params.tiktok_offset = j["tiktok_offset"];
+        if (j.contains("tiktok_intensity")) RF::params.tiktok_intensity = j["tiktok_intensity"];
+        
+        LOGI("Configuration loaded successfully");
+        return true;
+    }
+    
+    // Save configuration to file
+    bool SaveConfig() {
+        EnsureConfigDir();
+        
+        // Create JSON object with all parameters
+        nlohmann::json j;
+        j["enable_master"] = RF::params.enable_master;
+        j["brightness"] = RF::params.brightness;
+        j["contrast"] = RF::params.contrast;
+        j["saturation"] = RF::params.saturation;
+        j["temperature"] = RF::params.temperature;
+        j["vignette"] = RF::params.vignette;
+        j["enable_bw"] = RF::params.enable_bw;
+        j["enable_sepia"] = RF::params.enable_sepia;
+        j["sepia_intensity"] = RF::params.sepia_intensity;
+        j["film_grain"] = RF::params.film_grain;
+        j["enable_sharpen"] = RF::params.enable_sharpen;
+        j["sharpen_intensity"] = RF::params.sharpen_intensity;
+        j["enable_outline"] = RF::params.enable_outline;
+        j["outline_thresh"] = RF::params.outline_thresh;
+        j["outline_opacity"] = RF::params.outline_opacity;
+        j["enable_dof"] = RF::params.enable_dof;
+        j["focus_point_x"] = RF::params.focus_point.x;
+        j["focus_point_y"] = RF::params.focus_point.y;
+        j["focus_radius"] = RF::params.focus_radius;
+        j["blur_strength"] = RF::params.blur_strength;
+        j["transition"] = RF::params.transition;
+        j["chromatic"] = RF::params.chromatic;
+        j["art_style"] = RF::params.art_style;
+        j["art_intensity"] = RF::params.art_intensity;
+        j["enable_tiktok"] = RF::params.enable_tiktok;
+        j["tiktok_offset"] = RF::params.tiktok_offset;
+        j["tiktok_intensity"] = RF::params.tiktok_intensity;
+        
+        std::ofstream file(CONFIG_PATH);
+        if (!file.is_open()) {
+            LOGE("Failed to open config file for writing: %s", CONFIG_PATH);
+            return false;
+        }
+        
+        file << j.dump(4); // Pretty print with 4-space indentation
+        file.close();
+        
+        LOGI("Configuration saved to: %s", CONFIG_PATH);
+        return true;
     }
 }
 
@@ -1381,6 +1495,7 @@ static void DrawUI() {
         if (ImGui::Button(preset_names[i], ImVec2(210, 36))) {
             RF::current_preset = i;
             RF::ApplyPreset(i);
+            Config::SaveConfig(); // Save config when preset is changed
         }
         
         ImGui::PopStyleColor(2);
@@ -1397,33 +1512,47 @@ static void DrawUI() {
         // Adjust Tab
         if (ImGui::BeginTabItem("Adjust")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Enable", &RF::params.enable_master);
+            if (ImGui::Checkbox("Enable", &RF::params.enable_master)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             ImGui::Dummy(ImVec2(0, 10));
             ImGui::PushItemWidth(-20);
             
             // 紧凑的滑块布局
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Brightness");
-            ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f");
+            if (ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f")) {
+                Config::SaveConfig(); // Save config when changed
+            }
             ImGui::Dummy(ImVec2(0, 4));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Contrast");
-            ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f");
+            if (ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f")) {
+                Config::SaveConfig(); // Save config when changed
+            }
             ImGui::Dummy(ImVec2(0, 4));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Saturation");
-            ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f");
+            if (ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f")) {
+                Config::SaveConfig(); // Save config when changed
+            }
             ImGui::Dummy(ImVec2(0, 4));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Temperature");
-            ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f");
+            if (ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f")) {
+                Config::SaveConfig(); // Save config when changed
+            }
             ImGui::Dummy(ImVec2(0, 4));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Vignette");
-            ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f");
+            if (ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f")) {
+                Config::SaveConfig(); // Save config when changed
+            }
             ImGui::Dummy(ImVec2(0, 4));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Film Grain");
-            ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f");
+            if (ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f")) {
+                Config::SaveConfig(); // Save config when changed
+            }
             
             ImGui::PopItemWidth();
             ImGui::EndTabItem();
@@ -1442,11 +1571,14 @@ static void DrawUI() {
                 if (RF::params.art_style > 0) {
                     RF::params.art_intensity = 1.0f;
                 }
+                Config::SaveConfig(); // Save config when changed
             }
             
             if (RF::params.art_style > 0) {
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "Intensity: %.2f");
+                if (ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
                 ImGui::TextColored(ImVec4(0.45f, 0.45f, 0.50f, 1.0f), "%s effect applied", art_styles[RF::params.art_style]);
             }
             
@@ -1455,7 +1587,9 @@ static void DrawUI() {
             ImGui::Dummy(ImVec2(0, 8));
             
             // Manga B&W
-            ImGui::Checkbox("Manga B&W", &RF::params.enable_bw);
+            if (ImGui::Checkbox("Manga B&W", &RF::params.enable_bw)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             if (RF::params.enable_bw) {
                 ImGui::TextColored(ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "Comic-style high contrast B&W");
             }
@@ -1463,21 +1597,31 @@ static void DrawUI() {
             ImGui::Dummy(ImVec2(0, 8));
             
             // Sepia
-            ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia);
+            if (ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             if (RF::params.enable_sepia) {
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "Intensity: %.2f");
+                if (ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
             }
             
             ImGui::Dummy(ImVec2(0, 8));
             
             // Outline
-            ImGui::Checkbox("Black Outline", &RF::params.enable_outline);
+            if (ImGui::Checkbox("Black Outline", &RF::params.enable_outline)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             if (RF::params.enable_outline) {
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Threshold: %.2f");
+                if (ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Threshold: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f");
+                if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
             }
 
             ImGui::EndTabItem();
@@ -1486,19 +1630,29 @@ static void DrawUI() {
         // Effects Tab
         if (ImGui::BeginTabItem("Effects")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen);
+            if (ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             if (RF::params.enable_sharpen) {
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f");
+                if (ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
             }
             
             ImGui::Dummy(ImVec2(0, 10));
-            ImGui::Checkbox("TikTok RGB Split", &RF::params.enable_tiktok);
+            if (ImGui::Checkbox("TikTok RGB Split", &RF::params.enable_tiktok)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             if (RF::params.enable_tiktok) {
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f");
+                if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f");
+                if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
             }
             ImGui::EndTabItem();
         }
@@ -1506,26 +1660,37 @@ static void DrawUI() {
         // DOF Tab
         if (ImGui::BeginTabItem("DOF")) {
             ImGui::Dummy(ImVec2(0, 8));
-            ImGui::Checkbox("Enable Depth of Field", &RF::params.enable_dof);
+            if (ImGui::Checkbox("Enable Depth of Field", &RF::params.enable_dof)) {
+                Config::SaveConfig(); // Save config when changed
+            }
             
             if (RF::params.enable_dof) {
                 ImGui::Dummy(ImVec2(0, 6));
                 ImGui::PushStyleColor(ImGuiCol_Button, RF::focus_pending ? ImVec4(0.90f, 0.50f, 0.40f, 1.0f) : ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
                 if (ImGui::Button(RF::focus_pending ? "Tap Screen!" : "Set Focus Point", ImVec2(-1, 36))) {
                     RF::focus_pending = !RF::focus_pending;
+                    Config::SaveConfig(); // Save config when changed
                 }
                 ImGui::PopStyleColor();
                 ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
                 
                 ImGui::Dummy(ImVec2(0, 8));
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##FocusRadius", &RF::params.focus_radius, 0.05f, 0.5f, "Radius: %.2f");
+                if (ImGui::SliderFloat("##FocusRadius", &RF::params.focus_radius, 0.05f, 0.5f, "Radius: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##Transition", &RF::params.transition, 0.05f, 0.5f, "Softness: %.2f");
+                if (ImGui::SliderFloat("##Transition", &RF::params.transition, 0.05f, 0.5f, "Softness: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##BlurStr", &RF::params.blur_strength, 0.0f, 3.0f, "Blur: %.2f");
+                if (ImGui::SliderFloat("##BlurStr", &RF::params.blur_strength, 0.0f, 3.0f, "Blur: %.2f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
                 ImGui::SetNextItemWidth(-20);
-                ImGui::SliderFloat("##Chromatic", &RF::params.chromatic, 0.0f, 0.1f, "Chromatic: %.3f");
+                if (ImGui::SliderFloat("##Chromatic", &RF::params.chromatic, 0.0f, 0.1f, "Chromatic: %.3f")) {
+                    Config::SaveConfig(); // Save config when changed
+                }
             }
             ImGui::EndTabItem();
         }
@@ -1536,13 +1701,22 @@ static void DrawUI() {
     ImGui::EndChild();
     ImGui::EndChild();
 
-    // Bottom Reset Button
+    // Bottom buttons
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 48);
-    ImGui::SetCursorPosX((win_size.x - 120) * 0.5f);
+    ImGui::SetCursorPosX((win_size.x - 260) * 0.5f); // Center two buttons with 260px total width
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    
+    // Save Config Button
+    if (ImGui::Button("Save Config", ImVec2(120, 34))) {
+        Config::SaveConfig();
+    }
+    ImGui::SameLine();
+    
+    // Reset All Button
     if (ImGui::Button("Reset All", ImVec2(120, 34))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
+        Config::SaveConfig(); // Save the default configuration
     }
     ImGui::PopStyleVar();
 
@@ -1673,6 +1847,9 @@ static void* MainThread(void*) {
     sleep(3);
     LOGI("RenderFusion Pro loaded");
     GlossInit(true);
+    
+    // Load configuration from file if it exists
+    Config::LoadConfig();
     
     GHandle egl = GlossOpen("libEGL.so");
     if (egl) {
