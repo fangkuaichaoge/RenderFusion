@@ -757,103 +757,96 @@ uniform float uIntensity;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
 
-// 旋转2D坐标
-vec2 rotate2D(vec2 p, float angle) {
-    float c = cos(angle);
-    float s = sin(angle);
-    return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-// 椭圆形笔触形状
-float brushShape(vec2 p, vec2 size, float angle) {
-    p = rotate2D(p, angle);
-    vec2 d = abs(p / size);
-    return 1.0 - smoothstep(0.8, 1.0, max(d.x, d.y));
-}
+// 计算亮度
+float luminance(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
     
     // ========================================
-    // 1. 笔触网格 - 将画面分成笔触块
+    // 1. 彩色斜线阴影 - 彩铅笔触效果
     // ========================================
-    float brushSize = 8.0;  // 笔触大小
-    vec2 grid = floor(vTexCoord * brushSize);
-    vec2 localUV = fract(vTexCoord * brushSize) * 2.0 - 1.0;  // -1到1
+    float lum = luminance(color.rgb);
     
-    // 每个笔触块随机旋转角度
-    float angle = random(grid) * 3.14159 * 0.5;
+    // 多层斜线图案
+    vec2 uv1 = vTexCoord * 200.0;
+    vec2 uv2 = vTexCoord * 350.0;
     
-    // 随机笔触大小变化
-    vec2 size = vec2(0.7 + random(grid + 0.5) * 0.25, 
-                     0.5 + random(grid + 1.5) * 0.35);
+    // 主斜线层
+    float hatch1 = step(0.5, fract(uv1.x + uv1.y));
+    // 反向斜线层
+    float hatch2 = step(0.5, fract(uv1.x - uv1.y));
+    // 细斜线层
+    float hatch3 = step(0.5, fract(uv2.x + uv2.y));
     
-    // 计算笔触形状
-    float shape = brushShape(localUV, size, angle);
+    // 根据亮度调整阴影强度
+    float shadow = 0.0;
+    if(lum < 0.7) shadow += hatch1 * 0.15 * (0.7 - lum) / 0.7;
+    if(lum < 0.5) shadow += hatch2 * 0.2 * (0.5 - lum) / 0.5;
+    if(lum < 0.3) shadow += hatch3 * 0.15 * (0.3 - lum) / 0.3;
     
-    // ========================================
-    // 2. 获取笔触块的平均颜色
-    // ========================================
-    vec3 blockColor = vec3(0.0);
-    float weight = 0.0;
-    
-    // 采样笔触块范围内的颜色
-    for (float dx = -1.0; dx <= 1.0; dx += 1.0) {
-        for (float dy = -1.0; dy <= 1.0; dy += 1.0) {
-            vec2 sampleUV = (grid + vec2(dx, dy) + 0.5) / brushSize;
-            vec3 c = texture2D(uTexture, sampleUV).rgb;
-            float w = 1.0 + random(grid + vec2(dx, dy)) * 0.5;
-            blockColor += c * w;
-            weight += w;
-        }
-    }
-    blockColor /= weight;
+    // 彩色阴影 - 用原色的深色版本
+    vec3 darkColor = color.rgb * 0.65;
+    result = mix(result, darkColor, shadow);
     
     // ========================================
-    // 3. 颜色增强 - 油画浓郁色彩
+    // 2. 纸张纹理
     // ========================================
-    float gray = dot(blockColor, vec3(0.299, 0.587, 0.114));
-    blockColor = mix(vec3(gray), blockColor, 1.2);  // 提升饱和度
-    
-    // 对比度增强
-    blockColor = (blockColor - 0.5) * 1.15 + 0.5;
+    float paper = random(vTexCoord * 400.0) * 0.04;
+    result = result * (1.0 - paper * 0.5) + paper * 0.3;
     
     // ========================================
-    // 4. 色调分离 - 模拟颜料效果
+    // 3. 轻微提亮
     // ========================================
-    vec3 quantized = floor(blockColor * 5.99) / 6.0;
-    blockColor = mix(blockColor, quantized, 0.4);
+    result = result * 1.02 + 0.02;
     
     // ========================================
-    // 5. 颜色偏移 - 模拟颜料堆积
+    // 4. Sobel边缘检测 - 彩色描边
     // ========================================
-    vec3 colorShift = vec3(random(grid) - 0.5, 
-                           random(grid + 1.0) - 0.5, 
-                           random(grid + 2.0) - 0.5) * 0.08;
-    blockColor += colorShift;
+    vec3 c0 = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
+    vec3 c1 = texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb;
+    vec3 c2 = texture2D(uTexture, vTexCoord + vec2(-1.0,  1.0) * uTexelSize).rgb;
+    vec3 c3 = texture2D(uTexture, vTexCoord + vec2( 1.0,  1.0) * uTexelSize).rgb;
+    vec3 c4 = texture2D(uTexture, vTexCoord + vec2(-1.0,  0.0) * uTexelSize).rgb;
+    vec3 c5 = texture2D(uTexture, vTexCoord + vec2( 1.0,  0.0) * uTexelSize).rgb;
+    vec3 c6 = texture2D(uTexture, vTexCoord + vec2( 0.0, -1.0) * uTexelSize).rgb;
+    vec3 c7 = texture2D(uTexture, vTexCoord + vec2( 0.0,  1.0) * uTexelSize).rgb;
+    
+    // 亮度边缘
+    float l0 = luminance(color.rgb);
+    float l1 = luminance(c0), l2 = luminance(c1), l3 = luminance(c2), l4 = luminance(c3);
+    float l5 = luminance(c4), l6 = luminance(c5), l7 = luminance(c6), l8 = luminance(c7);
+    
+    float gx = -l1 + l2 - 2.0*l5 + 2.0*l6 - l3 + l4;
+    float gy = -l1 - 2.0*l7 - l2 + l3 + 2.0*l8 + l4;
+    float edge = sqrt(gx*gx + gy*gy);
+    
+    // 边缘描边强度
+    float outline = smoothstep(0.05, 0.25, edge);
     
     // ========================================
-    // 6. 笔触边缘处理
+    // 5. 彩色描边 - 用原色的更深/更鲜艳颜色
     // ========================================
-    // 相邻笔触的轻微颜色差异
-    vec3 neighborColor = vec3(0.0);
-    neighborColor += texture2D(uTexture, (grid + vec2(1.0, 0.0) + 0.5) / brushSize).rgb;
-    neighborColor += texture2D(uTexture, (grid + vec2(0.0, 1.0) + 0.5) / brushSize).rgb;
-    neighborColor *= 0.5;
+    // 先增加饱和度让颜色更鲜艳
+    float origGray = luminance(color.rgb);
+    vec3 vividColor = mix(vec3(origGray), color.rgb, 1.4);  // 饱和度提升1.4倍
     
-    // 在笔触边缘混合相邻颜色
-    float edgeFactor = 1.0 - shape;
-    blockColor = mix(blockColor, neighborColor, edgeFactor * 0.3);
+    // 再变深作为描边颜色
+    vec3 edgeColor = vividColor * 0.45;
+    
+    // 应用描边
+    result = mix(result, edgeColor, outline * 0.75);
     
     // ========================================
-    // 7. 笔触形状影响
+    // 6. 颜色增强 - 彩铅的鲜艳感
     // ========================================
-    // 笔触中心颜色稍亮，边缘稍暗
-    blockColor *= 0.92 + shape * 0.12;
+    float gray = luminance(result);
+    result = mix(vec3(gray), result, 1.1);
     
-    blockColor = clamp(blockColor, 0.0, 1.0);
+    result = clamp(result, 0.0, 1.0);
     
-    gl_FragColor = vec4(mix(color.rgb, blockColor, uIntensity), color.a);
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
@@ -1607,7 +1600,7 @@ static void DrawUI() {
             
             // Art Style
             ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Art Style");
-            const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Oil Painting"};
+            const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Color Pencil"};
             ImGui::SetNextItemWidth(-10);
             if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
                 if (RF::params.art_style > 0) RF::params.art_intensity = 1.0f;
