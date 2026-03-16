@@ -856,21 +856,6 @@ void main() {
     gl_FragColor = vec4(mix(color.rgb, blockColor, uIntensity), color.a);
 }
 )";
-    float l0 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-    float l1 = dot(texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float l2 = dot(texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float l3 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float l4 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    
-    float edge = abs(l0 - l1) + abs(l0 - l2) + abs(l0 - l3) + abs(l0 - l4);
-    float outline = smoothstep(0.03, 0.15, edge);
-    result = mix(result, result * 0.85, outline * 0.3);
-    
-    result = clamp(result, 0.0, 1.0);
-    
-    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
-}
-)";
 
 static float g_Time = 0.0f;
 
