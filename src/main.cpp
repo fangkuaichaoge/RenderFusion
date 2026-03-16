@@ -1103,7 +1103,8 @@ void RenderFilters(int w, int h) {
     }
 
     // Pass 2: Outline (Ping-Pong rendering to avoid texture feedback loop)
-    if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
+    // Skip outline when DOF is enabled to prevent conflicts
+    if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline && !RF::params.enable_dof) {
         // 读取 final_tex，写入到另一个 FBO（乒乓渲染）
         GLuint src_tex = final_tex;
         GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
@@ -1135,80 +1136,8 @@ void RenderFilters(int w, int h) {
         CHECK_GL_ERROR();
     }
 
-    // Pass 3: DOF (Only if FBO is valid)
-    if (use_fbo && RF::prog_gaussian != 0 && RF::prog_dof != 0 && RF::params.enable_dof) {
-        // 确定当前源纹理，选择另一个 FBO 作为目标
-        GLuint sharp_tex = final_tex;
-        GLuint blur_dst_fbo = (sharp_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint blur_dst_tex = (sharp_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        if (sharp_tex == RF::screen_tex) { blur_dst_fbo = RF::fbo; blur_dst_tex = RF::fbo_tex; }
-        
-        // Blur Pass 1: Horizontal
-        glBindFramebuffer(GL_FRAMEBUFFER, blur_dst_fbo);
-        BindQuad(RF::prog_gaussian);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, sharp_tex);
-        
-        GLint loc;
-        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f, 0.0f);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint blurred_tex = blur_dst_tex;
-
-        // Blur Pass 2: Vertical (乒乓：从 blur_dst_tex 读取，写入 sharp_tex 的 FBO)
-        GLuint blur2_dst_fbo = (blurred_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint blur2_dst_tex = (blurred_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, blur2_dst_fbo);
-        BindQuad(RF::prog_gaussian);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, blurred_tex);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
-        SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint final_blur_tex = blur2_dst_tex;
-
-        // DOF Composite (乒乓渲染)
-        GLuint dof_dst_fbo = (final_blur_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint dof_dst_tex = (final_blur_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, dof_dst_fbo);
-        BindQuad(RF::prog_dof);
-        
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, sharp_tex);
-        loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, final_blur_tex);
-        loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
-        SAFE_UNIFORM(loc, glUniform1i, 1);
-        
-        loc = glGetUniformLocation(RF::prog_dof, "uFocusPoint");
-        SAFE_UNIFORM(loc, glUniform2f, RF::params.focus_point.x, RF::params.focus_point.y);
-        loc = glGetUniformLocation(RF::prog_dof, "uFocusRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.focus_radius);
-        loc = glGetUniformLocation(RF::prog_dof, "uTransition");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.transition);
-        loc = glGetUniformLocation(RF::prog_dof, "uBlurStrength");
-        SAFE_UNIFORM(loc, glUniform1f, 1.0f);
-        loc = glGetUniformLocation(RF::prog_dof, "uChromatic");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = dof_dst_tex;
-        CHECK_GL_ERROR();
-    }
-
-    // Pass 4: TikTok RGB Split
+    // Pass 3: DOF (Only if FBO is valid) - Moved to the end to apply as final effect
+    // Pass 4: TikTok RGB Split 
     if (RF::prog_tiktok != 0 && RF::params.enable_tiktok) {
         GLuint src_tex = final_tex;
         GLuint dst_fbo = use_fbo ? ((src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo) : 0;
@@ -1233,7 +1162,7 @@ void RenderFilters(int w, int h) {
         CHECK_GL_ERROR();
     }
 
-    // Pass 5: Art Style (Cel, Ink, Painting, Oil, Sketch)
+    // Pass 5: Art Style
     if (use_fbo && RF::params.art_style > 0) {
         GLuint src_tex = final_tex;
         GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
@@ -1270,6 +1199,118 @@ void RenderFilters(int w, int h) {
             final_tex = dst_tex;
             CHECK_GL_ERROR();
         }
+    }
+
+    // Pass 6: Outline (Moved before DOF to allow proper叠加)
+    if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
+        // 读取 final_tex，写入到另一个 FBO（乒乓渲染）
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        if (src_tex == RF::screen_tex) {
+            dst_fbo = RF::fbo;
+            dst_tex = RF::fbo_tex;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+        BindQuad(RF::prog_outline);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_outline, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_outline, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_outline, "uThresh");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_thresh);
+        loc = glGetUniformLocation(RF::prog_outline, "uOpacity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dst_tex;
+        CHECK_GL_ERROR();
+    }
+
+    // Pass 7: DOF (Apply as final effect to preserve focus point even with other effects)
+    if (use_fbo && RF::prog_gaussian != 0 && RF::prog_dof != 0 && RF::params.enable_dof) {
+        // Apply DOF as the final effect to preserve focus point
+        GLuint original_tex = final_tex;  // This is the texture after all other filters
+        
+        // Perform blur pass on the current texture to create the blurred version
+        GLuint blur_dst_fbo = (original_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint blur_dst_tex = (original_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        if (original_tex == RF::screen_tex) { blur_dst_fbo = RF::fbo; blur_dst_tex = RF::fbo_tex; }
+        
+        // Blur Pass 1: Horizontal
+        glBindFramebuffer(GL_FRAMEBUFFER, blur_dst_fbo);
+        BindQuad(RF::prog_gaussian);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, original_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f, 0.0f);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        GLuint blurred_tex = blur_dst_tex;
+
+        // Blur Pass 2: Vertical
+        GLuint blur2_dst_fbo = (blurred_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint blur2_dst_tex = (blurred_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, blur2_dst_fbo);
+        BindQuad(RF::prog_gaussian);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, blurred_tex);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
+        SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
+        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        GLuint final_blur_tex = blur2_dst_tex;
+
+        // DOF Composite - Use the processed texture (after all other filters) as sharp and the blurred as background
+        GLuint dof_dst_fbo = (final_blur_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dof_dst_tex = (final_blur_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, dof_dst_fbo);
+        BindQuad(RF::prog_dof);
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, original_tex);  // Texture after all other filters
+        loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, final_blur_tex);  // Blurred version of processed texture
+        loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
+        SAFE_UNIFORM(loc, glUniform1i, 1);
+        
+        loc = glGetUniformLocation(RF::prog_dof, "uFocusPoint");
+        SAFE_UNIFORM(loc, glUniform2f, RF::params.focus_point.x, RF::params.focus_point.y);
+        loc = glGetUniformLocation(RF::prog_dof, "uFocusRadius");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.focus_radius);
+        loc = glGetUniformLocation(RF::prog_dof, "uTransition");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.transition);
+        loc = glGetUniformLocation(RF::prog_dof, "uBlurStrength");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength);
+        loc = glGetUniformLocation(RF::prog_dof, "uChromatic");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dof_dst_tex;
+        CHECK_GL_ERROR();
     }
 
     // ==========================================
@@ -1560,7 +1601,6 @@ static void DrawUI() {
 
         // Stylize Tab
         if (ImGui::BeginTabItem("Stylize")) {
-            ImGui::Dummy(ImVec2(0, 8));
             
             // Art Style
             ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Art Style");
@@ -1665,6 +1705,7 @@ static void DrawUI() {
             }
             
             if (RF::params.enable_dof) {
+                ImGui::TextColored(ImVec4(0.40f, 0.80f, 0.40f, 1.0f), "DOF applied as final effect");
                 ImGui::Dummy(ImVec2(0, 6));
                 ImGui::PushStyleColor(ImGuiCol_Button, RF::focus_pending ? ImVec4(0.90f, 0.50f, 0.40f, 1.0f) : ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
                 if (ImGui::Button(RF::focus_pending ? "Tap Screen!" : "Set Focus Point", ImVec2(-1, 36))) {
