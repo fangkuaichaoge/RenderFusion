@@ -757,77 +757,105 @@ uniform float uIntensity;
 
 float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
 
+// 旋转2D坐标
+vec2 rotate2D(vec2 p, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// 椭圆形笔触形状
+float brushShape(vec2 p, vec2 size, float angle) {
+    p = rotate2D(p, angle);
+    vec2 d = abs(p / size);
+    return 1.0 - smoothstep(0.8, 1.0, max(d.x, d.y));
+}
+
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
-    vec3 result = color.rgb;
     
     // ========================================
-    // 1. 油画笔触 - Kuwahara滤波变体
+    // 1. 笔触网格 - 将画面分成笔触块
     // ========================================
-    float radius = 3.0;
-    vec3 sum = vec3(0.0);
-    float totalWeight = 0.0;
+    float brushSize = 8.0;  // 笔触大小
+    vec2 grid = floor(vTexCoord * brushSize);
+    vec2 localUV = fract(vTexCoord * brushSize) * 2.0 - 1.0;  // -1到1
     
-    // 分4个方向区域采样，选择方差最小的区域
-    for (int quadrant = 0; quadrant < 4; quadrant++) {
-        vec3 mean = vec3(0.0);
-        vec3 var = vec3(0.0);
-        float count = 0.0;
-        
-        for (float x = -radius; x <= 0.0; x += 1.0) {
-            for (float y = -radius; y <= 0.0; y += 1.0) {
-                vec2 offset;
-                if (quadrant == 0) offset = vec2(x, y);
-                else if (quadrant == 1) offset = vec2(-x, y);
-                else if (quadrant == 2) offset = vec2(x, -y);
-                else offset = vec2(-x, -y);
-                
-                vec3 c = texture2D(uTexture, vTexCoord + offset * uTexelSize).rgb;
-                mean += c;
-                var += c * c;
-                count += 1.0;
-            }
+    // 每个笔触块随机旋转角度
+    float angle = random(grid) * 3.14159 * 0.5;
+    
+    // 随机笔触大小变化
+    vec2 size = vec2(0.7 + random(grid + 0.5) * 0.25, 
+                     0.5 + random(grid + 1.5) * 0.35);
+    
+    // 计算笔触形状
+    float shape = brushShape(localUV, size, angle);
+    
+    // ========================================
+    // 2. 获取笔触块的平均颜色
+    // ========================================
+    vec3 blockColor = vec3(0.0);
+    float weight = 0.0;
+    
+    // 采样笔触块范围内的颜色
+    for (float dx = -1.0; dx <= 1.0; dx += 1.0) {
+        for (float dy = -1.0; dy <= 1.0; dy += 1.0) {
+            vec2 sampleUV = (grid + vec2(dx, dy) + 0.5) / brushSize;
+            vec3 c = texture2D(uTexture, sampleUV).rgb;
+            float w = 1.0 + random(grid + vec2(dx, dy)) * 0.5;
+            blockColor += c * w;
+            weight += w;
         }
-        mean /= count;
-        var = var / count - mean * mean;
-        float variance = dot(var, vec3(0.299, 0.587, 0.114));
-        
-        // 方差越小的区域权重越大（笔触更均匀）
-        float weight = 1.0 / (1.0 + variance * 100.0);
-        sum += mean * weight;
-        totalWeight += weight;
     }
-    result = sum / totalWeight;
+    blockColor /= weight;
     
     // ========================================
-    // 2. 颜色增强 - 油画的浓郁色彩
+    // 3. 颜色增强 - 油画浓郁色彩
     // ========================================
-    float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 1.15);  // 提升饱和度
+    float gray = dot(blockColor, vec3(0.299, 0.587, 0.114));
+    blockColor = mix(vec3(gray), blockColor, 1.2);  // 提升饱和度
     
     // 对比度增强
-    result = (result - 0.5) * 1.12 + 0.5;
+    blockColor = (blockColor - 0.5) * 1.15 + 0.5;
     
     // ========================================
-    // 3. 笔触纹理 - 模拟油画厚涂质感
+    // 4. 色调分离 - 模拟颜料效果
     // ========================================
-    vec2 brushUV = vTexCoord * 80.0;
-    float brush = random(floor(brushUV));
-    result = result + (brush - 0.5) * 0.04;
-    
-    // 细微的画布纹理
-    float canvas = random(vTexCoord * 400.0);
-    result += canvas * 0.015 - 0.0075;
+    vec3 quantized = floor(blockColor * 5.99) / 6.0;
+    blockColor = mix(blockColor, quantized, 0.4);
     
     // ========================================
-    // 4. 色调分离 - 模拟油画颜料混合
+    // 5. 颜色偏移 - 模拟颜料堆积
     // ========================================
-    vec3 quantized = floor(result * 7.99) / 8.0;
-    result = mix(result, quantized, 0.25);
+    vec3 colorShift = vec3(random(grid) - 0.5, 
+                           random(grid + 1.0) - 0.5, 
+                           random(grid + 2.0) - 0.5) * 0.08;
+    blockColor += colorShift;
     
     // ========================================
-    // 5. 轻微边缘增强
+    // 6. 笔触边缘处理
     // ========================================
+    // 相邻笔触的轻微颜色差异
+    vec3 neighborColor = vec3(0.0);
+    neighborColor += texture2D(uTexture, (grid + vec2(1.0, 0.0) + 0.5) / brushSize).rgb;
+    neighborColor += texture2D(uTexture, (grid + vec2(0.0, 1.0) + 0.5) / brushSize).rgb;
+    neighborColor *= 0.5;
+    
+    // 在笔触边缘混合相邻颜色
+    float edgeFactor = 1.0 - shape;
+    blockColor = mix(blockColor, neighborColor, edgeFactor * 0.3);
+    
+    // ========================================
+    // 7. 笔触形状影响
+    // ========================================
+    // 笔触中心颜色稍亮，边缘稍暗
+    blockColor *= 0.92 + shape * 0.12;
+    
+    blockColor = clamp(blockColor, 0.0, 1.0);
+    
+    gl_FragColor = vec4(mix(color.rgb, blockColor, uIntensity), color.a);
+}
+)";
     float l0 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
     float l1 = dot(texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
     float l2 = dot(texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
