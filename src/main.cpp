@@ -65,6 +65,7 @@ namespace RF {
         GLuint prog_sketch = 0;      // 素描
         GLuint prog_anime = 0;       // 二次元平面
         GLuint prog_comic = 0;       // 美漫画
+        GLuint prog_oil = 0;         // 油画
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -96,7 +97,7 @@ namespace RF {
         float outline_opacity = 1.0f;
         
         // Art Styles
-        int art_style = 0;      // 0=Off, 1=Cel Anime, 2=Chinese Painting, 3=Sketch, 4=Anime Flat, 5=Comic
+        int art_style = 0;      // 0=Off, 1=Cel Anime, 2=Chinese Painting, 3=Sketch, 4=Anime Flat, 5=Comic, 6=Oil Painting
         float art_intensity = 1.0f;
         
         // TikTok RGB Split
@@ -544,80 +545,57 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
 
-float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
-    vec3 c = color.rgb;
+    vec3 result = color.rgb;
     
-    // ========================================
-    // 1. 颜色晕染 - 双层晕染增强效果
-    // ========================================
-    // 近距晕染 - 细节保留
-    vec3 bleed1 = c * 0.16;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb * 0.12;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb * 0.12;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb * 0.12;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb * 0.12;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * uTexelSize).rgb * 0.09;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * uTexelSize).rgb * 0.09;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * uTexelSize).rgb * 0.09;
-    bleed1 += texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * uTexelSize).rgb * 0.09;
+    // 降低饱和度 - 淡雅感
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 0.6);
     
-    // 远距晕染 - 扩散效果
-    vec3 bleed2 = c * 0.08;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2(-3.0, 0.0) * uTexelSize).rgb * 0.10;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 3.0, 0.0) * uTexelSize).rgb * 0.10;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0,-3.0) * uTexelSize).rgb * 0.10;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0, 3.0) * uTexelSize).rgb * 0.10;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2(-4.0,-4.0) * uTexelSize).rgb * 0.06;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 4.0,-4.0) * uTexelSize).rgb * 0.06;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2(-4.0, 4.0) * uTexelSize).rgb * 0.06;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 4.0, 4.0) * uTexelSize).rgb * 0.06;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2(-5.0, 0.0) * uTexelSize).rgb * 0.05;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 5.0, 0.0) * uTexelSize).rgb * 0.05;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0,-5.0) * uTexelSize).rgb * 0.05;
-    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0, 5.0) * uTexelSize).rgb * 0.05;
+    // 整体提亮 - 留白效果
+    result = result * 0.85 + 0.12;
     
-    // 混合两层晕染
-    c = mix(c, bleed1, 0.55);
-    c = mix(c, bleed2, 0.45);
+    // 水墨晕染 - 柔和扩散
+    vec3 ink = result * 0.2;
+    ink += texture2D(uTexture, vTexCoord + vec2(-1.5, 0.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 1.5, 0.0) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.5) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.5) * uTexelSize).rgb * 0.12;
+    ink += texture2D(uTexture, vTexCoord + vec2(-2.5, -2.5) * uTexelSize).rgb * 0.04;
+    ink += texture2D(uTexture, vTexCoord + vec2( 2.5, -2.5) * uTexelSize).rgb * 0.04;
+    ink += texture2D(uTexture, vTexCoord + vec2(-2.5,  2.5) * uTexelSize).rgb * 0.04;
+    ink += texture2D(uTexture, vTexCoord + vec2( 2.5,  2.5) * uTexelSize).rgb * 0.04;
     
-    // ========================================
-    // 2. 淡雅色调处理 - 保留颜色
-    // ========================================
-    float gray = dot(c, vec3(0.299, 0.587, 0.114));
-    c = mix(vec3(gray), c, 0.70);  // 保留更多颜色
-    c = c * 0.90 + 0.06;           // 轻微提亮
+    result = mix(result, ink, 0.35);
     
-    // ========================================
-    // 3. 宣纸纹理
-    // ========================================
-    float paper = random(vTexCoord * 220.0);
-    c += paper * 0.018 - 0.009;
+    // 淡墨色调分离 - 6阶，层次感
+    vec3 quantized = floor(result * 5.99) / 6.0;
+    result = mix(result, quantized, 0.25);
     
-    // ========================================
-    // 4. 淡墨勾勒
-    // ========================================
-    float l0 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-    float l1 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float l2 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float l3 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float l4 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    // 宣纸纹理 - 淡淡的
+    float paper = random(vTexCoord * 300.0);
+    result = result + paper * 0.02 - 0.01;
     
-    float edge = abs(l0-l1) + abs(l0-l2) + abs(l0-l3) + abs(l0-l4);
-    float outline = smoothstep(0.02, 0.10, edge);
-    c = mix(c, c * 0.75, outline * 0.35);
+    // 淡墨勾勒 - 非常轻微
+    float c4 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float edge = abs(c4 - c5) + abs(c4 - c6) + abs(c4 - c7) + abs(c4 - c0);
+    float outline = smoothstep(0.015, 0.08, edge);
     
-    // ========================================
-    // 5. 层次感
-    // ========================================
-    vec3 quant = floor(c * 5.99) / 6.0;
-    c = mix(c, quant, 0.15);
+    // 淡墨勾勒 - 用浅色
+    vec3 lightInk = result * 0.85;
+    result = mix(result, lightInk, outline * 0.3);
     
-    c = clamp(c, 0.0, 1.0);
+    // 最终整体淡雅调
+    result = result * 0.95 + 0.025;
     
-    gl_FragColor = vec4(mix(color.rgb, c, uIntensity), color.a);
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
@@ -764,6 +742,103 @@ void main() {
     // 描边用中灰色调
     vec3 outlineColor = result * 0.3 + vec3(0.08);
     result = mix(result, outlineColor, outline * 0.6);
+    
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+}
+)";
+
+// 油画风格 (Oil Painting) - 笔触效果
+const char* g_frag_oil = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uIntensity;
+
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
+    
+    // ========================================
+    // 1. 油画笔触 - Kuwahara滤波变体
+    // ========================================
+    float radius = 3.0;
+    vec3 sum = vec3(0.0);
+    float totalWeight = 0.0;
+    
+    // 分4个方向区域采样，选择方差最小的区域
+    for (int quadrant = 0; quadrant < 4; quadrant++) {
+        vec3 mean = vec3(0.0);
+        vec3 var = vec3(0.0);
+        float count = 0.0;
+        
+        for (float x = -radius; x <= 0.0; x += 1.0) {
+            for (float y = -radius; y <= 0.0; y += 1.0) {
+                vec2 offset;
+                if (quadrant == 0) offset = vec2(x, y);
+                else if (quadrant == 1) offset = vec2(-x, y);
+                else if (quadrant == 2) offset = vec2(x, -y);
+                else offset = vec2(-x, -y);
+                
+                vec3 c = texture2D(uTexture, vTexCoord + offset * uTexelSize).rgb;
+                mean += c;
+                var += c * c;
+                count += 1.0;
+            }
+        }
+        mean /= count;
+        var = var / count - mean * mean;
+        float variance = dot(var, vec3(0.299, 0.587, 0.114));
+        
+        // 方差越小的区域权重越大（笔触更均匀）
+        float weight = 1.0 / (1.0 + variance * 100.0);
+        sum += mean * weight;
+        totalWeight += weight;
+    }
+    result = sum / totalWeight;
+    
+    // ========================================
+    // 2. 颜色增强 - 油画的浓郁色彩
+    // ========================================
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 1.15);  // 提升饱和度
+    
+    // 对比度增强
+    result = (result - 0.5) * 1.12 + 0.5;
+    
+    // ========================================
+    // 3. 笔触纹理 - 模拟油画厚涂质感
+    // ========================================
+    vec2 brushUV = vTexCoord * 80.0;
+    float brush = random(floor(brushUV));
+    result = result + (brush - 0.5) * 0.04;
+    
+    // 细微的画布纹理
+    float canvas = random(vTexCoord * 400.0);
+    result += canvas * 0.015 - 0.0075;
+    
+    // ========================================
+    // 4. 色调分离 - 模拟油画颜料混合
+    // ========================================
+    vec3 quantized = floor(result * 7.99) / 8.0;
+    result = mix(result, quantized, 0.25);
+    
+    // ========================================
+    // 5. 轻微边缘增强
+    // ========================================
+    float l0 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    float l1 = dot(texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float l2 = dot(texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float l3 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float l4 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    
+    float edge = abs(l0 - l1) + abs(l0 - l2) + abs(l0 - l3) + abs(l0 - l4);
+    float outline = smoothstep(0.03, 0.15, edge);
+    result = mix(result, result * 0.85, outline * 0.3);
+    
+    result = clamp(result, 0.0, 1.0);
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
@@ -960,6 +1035,11 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_comic = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_comic));
     }
+    // Oil Painting shader
+    if (RF::prog_oil == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_oil = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_oil));
+    }
 
     // Check if shaders are valid
     RF::shaders_valid = (RF::prog_base != 0);
@@ -1145,6 +1225,7 @@ void RenderFilters(int w, int h) {
             case 3: prog = RF::prog_sketch; break;
             case 4: prog = RF::prog_anime; break;
             case 5: prog = RF::prog_comic; break;
+            case 6: prog = RF::prog_oil; break;
         }
         
         if (prog != 0) {
@@ -1513,7 +1594,7 @@ static void DrawUI() {
             
             // Art Style
             ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Art Style");
-            const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic"};
+            const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Oil Painting"};
             ImGui::SetNextItemWidth(-10);
             if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
                 if (RF::params.art_style > 0) RF::params.art_intensity = 1.0f;
