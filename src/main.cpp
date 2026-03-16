@@ -765,44 +765,54 @@ void main() {
     vec3 result = color.rgb;
     
     // ========================================
-    // 1. 彩色斜线阴影 - 彩铅笔触效果
+    // 1. 细细的铅笔笔触纹理 - 用彩色线条
     // ========================================
     float lum = luminance(color.rgb);
     
-    // 多层斜线图案
-    vec2 uv1 = vTexCoord * 200.0;
-    vec2 uv2 = vTexCoord * 350.0;
+    // 多层细斜线图案 - 模拟铅笔笔触
+    vec2 uv1 = vTexCoord * 280.0;  // 细线条
+    vec2 uv2 = vTexCoord * 450.0;  // 更细的线条
+    vec2 uv3 = vTexCoord * 180.0;  // 中等线条
     
     // 主斜线层
-    float hatch1 = step(0.5, fract(uv1.x + uv1.y));
+    float line1 = step(0.5, fract(uv1.x + uv1.y));
     // 反向斜线层
-    float hatch2 = step(0.5, fract(uv1.x - uv1.y));
+    float line2 = step(0.5, fract(uv1.x - uv1.y));
     // 细斜线层
-    float hatch3 = step(0.5, fract(uv2.x + uv2.y));
+    float line3 = step(0.5, fract(uv2.x + uv2.y));
+    // 中等斜线
+    float line4 = step(0.5, fract(uv3.x - uv3.y));
     
-    // 根据亮度调整阴影强度
-    float shadow = 0.0;
-    if(lum < 0.7) shadow += hatch1 * 0.15 * (0.7 - lum) / 0.7;
-    if(lum < 0.5) shadow += hatch2 * 0.2 * (0.5 - lum) / 0.5;
-    if(lum < 0.3) shadow += hatch3 * 0.15 * (0.3 - lum) / 0.3;
+    // 根据亮度叠加笔触线条，用原色的深色版本
+    vec3 darkColor = color.rgb * 0.6;
     
-    // 彩色阴影 - 用原色的深色版本
-    vec3 darkColor = color.rgb * 0.65;
-    result = mix(result, darkColor, shadow);
+    // 亮部用细线条轻轻扫过
+    if(lum > 0.6) {
+        result = mix(result, darkColor, line3 * 0.08);
+    }
+    // 中间调叠加多层笔触
+    if(lum < 0.7) {
+        result = mix(result, darkColor, line1 * 0.12 * (0.7 - lum) / 0.7);
+    }
+    if(lum < 0.5) {
+        result = mix(result, darkColor, line2 * 0.15 * (0.5 - lum) / 0.5);
+    }
+    // 暗部叠加更多笔触
+    if(lum < 0.35) {
+        result = mix(result, darkColor, line4 * 0.18 * (0.35 - lum) / 0.35);
+    }
+    if(lum < 0.2) {
+        result = mix(result, darkColor * 0.7, line3 * 0.2 * (0.2 - lum) / 0.2);
+    }
     
     // ========================================
     // 2. 纸张纹理
     // ========================================
-    float paper = random(vTexCoord * 400.0) * 0.04;
-    result = result * (1.0 - paper * 0.5) + paper * 0.3;
+    float paper = random(vTexCoord * 500.0) * 0.03;
+    result = result * (1.0 - paper * 0.4) + paper * 0.2;
     
     // ========================================
-    // 3. 轻微提亮
-    // ========================================
-    result = result * 1.02 + 0.02;
-    
-    // ========================================
-    // 4. Sobel边缘检测 - 彩色描边
+    // 3. Sobel边缘检测 - 彩色描边
     // ========================================
     vec3 c0 = texture2D(uTexture, vTexCoord + vec2(-1.0, -1.0) * uTexelSize).rgb;
     vec3 c1 = texture2D(uTexture, vTexCoord + vec2( 1.0, -1.0) * uTexelSize).rgb;
@@ -823,26 +833,15 @@ void main() {
     float edge = sqrt(gx*gx + gy*gy);
     
     // 边缘描边强度
-    float outline = smoothstep(0.05, 0.25, edge);
+    float outline = smoothstep(0.05, 0.22, edge);
     
     // ========================================
-    // 5. 彩色描边 - 用原色的更深/更鲜艳颜色
+    // 4. 彩色描边 - 用原色的深色版本
     // ========================================
-    // 先增加饱和度让颜色更鲜艳
-    float origGray = luminance(color.rgb);
-    vec3 vividColor = mix(vec3(origGray), color.rgb, 1.4);  // 饱和度提升1.4倍
-    
-    // 再变深作为描边颜色
-    vec3 edgeColor = vividColor * 0.45;
+    vec3 edgeColor = color.rgb * 0.4;  // 描边用原色的深色版本
     
     // 应用描边
-    result = mix(result, edgeColor, outline * 0.75);
-    
-    // ========================================
-    // 6. 颜色增强 - 彩铅的鲜艳感
-    // ========================================
-    float gray = luminance(result);
-    result = mix(vec3(gray), result, 1.1);
+    result = mix(result, edgeColor, outline * 0.7);
     
     result = clamp(result, 0.0, 1.0);
     
