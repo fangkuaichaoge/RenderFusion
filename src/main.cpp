@@ -551,32 +551,50 @@ void main() {
     vec3 c = color.rgb;
     
     // ========================================
-    // 1. 颜色晕染 - 单层高效高斯模糊
+    // 1. 颜色晕染 - 双层晕染增强效果
     // ========================================
-    vec3 bleed = c * 0.2;
-    bleed += texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb * 0.12;
-    bleed += texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb * 0.12;
-    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb * 0.12;
-    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb * 0.12;
-    bleed += texture2D(uTexture, vTexCoord + vec2(-4.0, 0.0) * uTexelSize).rgb * 0.06;
-    bleed += texture2D(uTexture, vTexCoord + vec2( 4.0, 0.0) * uTexelSize).rgb * 0.06;
-    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0,-4.0) * uTexelSize).rgb * 0.06;
-    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0, 4.0) * uTexelSize).rgb * 0.06;
+    // 近距晕染 - 细节保留
+    vec3 bleed1 = c * 0.16;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb * 0.12;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb * 0.12;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb * 0.12;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb * 0.12;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * uTexelSize).rgb * 0.09;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * uTexelSize).rgb * 0.09;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * uTexelSize).rgb * 0.09;
+    bleed1 += texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * uTexelSize).rgb * 0.09;
     
-    c = mix(c, bleed, 0.4);
+    // 远距晕染 - 扩散效果
+    vec3 bleed2 = c * 0.08;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2(-3.0, 0.0) * uTexelSize).rgb * 0.10;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 3.0, 0.0) * uTexelSize).rgb * 0.10;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0,-3.0) * uTexelSize).rgb * 0.10;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0, 3.0) * uTexelSize).rgb * 0.10;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2(-4.0,-4.0) * uTexelSize).rgb * 0.06;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 4.0,-4.0) * uTexelSize).rgb * 0.06;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2(-4.0, 4.0) * uTexelSize).rgb * 0.06;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 4.0, 4.0) * uTexelSize).rgb * 0.06;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2(-5.0, 0.0) * uTexelSize).rgb * 0.05;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 5.0, 0.0) * uTexelSize).rgb * 0.05;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0,-5.0) * uTexelSize).rgb * 0.05;
+    bleed2 += texture2D(uTexture, vTexCoord + vec2( 0.0, 5.0) * uTexelSize).rgb * 0.05;
+    
+    // 混合两层晕染
+    c = mix(c, bleed1, 0.55);
+    c = mix(c, bleed2, 0.45);
     
     // ========================================
-    // 2. 淡雅色调处理
+    // 2. 淡雅色调处理 - 保留颜色
     // ========================================
     float gray = dot(c, vec3(0.299, 0.587, 0.114));
-    c = mix(vec3(gray), c, 0.65);  // 保留部分颜色
-    c = c * 0.88 + 0.08;           // 提亮留白
+    c = mix(vec3(gray), c, 0.70);  // 保留更多颜色
+    c = c * 0.90 + 0.06;           // 轻微提亮
     
     // ========================================
     // 3. 宣纸纹理
     // ========================================
-    float paper = random(vTexCoord * 250.0);
-    c += paper * 0.025 - 0.0125;
+    float paper = random(vTexCoord * 220.0);
+    c += paper * 0.018 - 0.009;
     
     // ========================================
     // 4. 淡墨勾勒
@@ -588,16 +606,15 @@ void main() {
     float l4 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
     
     float edge = abs(l0-l1) + abs(l0-l2) + abs(l0-l3) + abs(l0-l4);
-    float outline = smoothstep(0.02, 0.12, edge);
-    c = mix(c, c * 0.7, outline * 0.4);
+    float outline = smoothstep(0.02, 0.10, edge);
+    c = mix(c, c * 0.75, outline * 0.35);
     
     // ========================================
     // 5. 层次感
     // ========================================
     vec3 quant = floor(c * 5.99) / 6.0;
-    c = mix(c, quant, 0.2);
+    c = mix(c, quant, 0.15);
     
-    c = c * 0.95 + 0.025;
     c = clamp(c, 0.0, 1.0);
     
     gl_FragColor = vec4(mix(color.rgb, c, uIntensity), color.a);
