@@ -1270,349 +1270,750 @@ static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    // 现代深色主题配色 - 更加精致的配色方案
-    ImVec4 bg_dark(0.06f, 0.06f, 0.08f, 0.97f);      // 深色背景
-    ImVec4 bg_medium(0.10f, 0.10f, 0.13f, 1.0f);     // 中等深色背景
-    ImVec4 bg_light(0.14f, 0.14f, 0.17f, 1.0f);      // 浅色背景
-    ImVec4 accent(0.30f, 0.60f, 0.90f, 1.0f);        // 蓝色主题色（更柔和）
-    ImVec4 accent_hover(0.40f, 0.70f, 1.0f, 1.0f);   // 悬停时的强调色
-    ImVec4 accent_active(0.20f, 0.50f, 0.80f, 1.0f); // 激活时的强调色
-    ImVec4 text_main(0.98f, 0.98f, 1.00f, 1.0f);     // 主要文本颜色
-    ImVec4 text_dim(0.65f, 0.65f, 0.70f, 1.0f);      // 次要文本颜色
-    ImVec4 text_hint(0.45f, 0.45f, 0.50f, 1.0f);     // 提示文本颜色
-
+    // ============================================
+    // 现代深色玻璃态主题 - Premium Dark Glass Theme
+    // ============================================
+    
+    // 核心色板 - 高级深色调
+    ImVec4 bg_darkest(0.035f, 0.038f, 0.048f, 0.96f);       // 最深背景
+    ImVec4 bg_dark(0.055f, 0.058f, 0.072f, 0.98f);          // 深色背景
+    ImVec4 bg_medium(0.095f, 0.098f, 0.115f, 1.0f);         // 中等背景
+    ImVec4 bg_light(0.135f, 0.140f, 0.165f, 1.0f);          // 浅色背景
+    ImVec4 bg_hover(0.175f, 0.180f, 0.210f, 1.0f);          // 悬停背景
+    
+    // 主色调 - 科技蓝紫渐变系
+    ImVec4 accent_primary(0.28f, 0.56f, 0.92f, 1.0f);       // 主强调色
+    ImVec4 accent_hover(0.35f, 0.65f, 0.98f, 1.0f);         // 悬停强调
+    ImVec4 accent_active(0.22f, 0.48f, 0.85f, 1.0f);        // 激活强调
+    ImVec4 accent_glow(0.32f, 0.60f, 0.95f, 0.35f);         // 发光效果
+    
+    // 文字色阶
+    ImVec4 text_primary(0.95f, 0.96f, 0.98f, 1.0f);         // 主要文字
+    ImVec4 text_secondary(0.72f, 0.74f, 0.78f, 1.0f);       // 次要文字
+    ImVec4 text_muted(0.50f, 0.52f, 0.58f, 1.0f);           // 提示文字
+    ImVec4 text_disabled(0.35f, 0.38f, 0.42f, 1.0f);        // 禁用文字
+    
+    // 成功/警告色
+    ImVec4 success(0.18f, 0.78f, 0.52f, 1.0f);              // 成功绿
+    ImVec4 warning(0.95f, 0.72f, 0.18f, 1.0f);              // 警告橙
+    
+    // ============================================
+    // 颜色配置
+    // ============================================
+    
+    // 窗口背景 - 玻璃态效果
     c[ImGuiCol_WindowBg] = bg_dark;
-    c[ImGuiCol_ChildBg] = ImVec4(0.08f, 0.08f, 0.11f, 1.0f);
-    c[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.11f, 0.95f);
-    c[ImGuiCol_TitleBgActive] = ImVec4(0.10f, 0.10f, 0.14f, 1.0f);
-    c[ImGuiCol_FrameBg] = bg_light;
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.18f, 0.18f, 0.24f, 1.0f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.22f, 0.22f, 0.29f, 1.0f);
+    c[ImGuiCol_ChildBg] = ImVec4(0.065f, 0.068f, 0.085f, 0.92f);
+    c[ImGuiCol_PopupBg] = ImVec4(0.055f, 0.058f, 0.075f, 0.98f);
+    
+    // 标题栏
+    c[ImGuiCol_TitleBg] = ImVec4(0.045f, 0.048f, 0.062f, 0.95f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.065f, 0.068f, 0.085f, 1.0f);
+    c[ImGuiCol_TitleBgCollapsed] = ImVec4(0.035f, 0.038f, 0.052f, 0.85f);
+    
+    // 帧背景 - 控件背景
+    c[ImGuiCol_FrameBg] = bg_medium;
+    c[ImGuiCol_FrameBgHovered] = bg_light;
+    c[ImGuiCol_FrameBgActive] = bg_hover;
+    
+    // 按钮
     c[ImGuiCol_Button] = bg_light;
     c[ImGuiCol_ButtonHovered] = accent_hover;
     c[ImGuiCol_ButtonActive] = accent_active;
-    c[ImGuiCol_SliderGrab] = accent;
+    
+    // 滑块
+    c[ImGuiCol_SliderGrab] = accent_primary;
     c[ImGuiCol_SliderGrabActive] = accent_hover;
-    c[ImGuiCol_CheckMark] = accent;
-    c[ImGuiCol_Text] = text_main;
-    c[ImGuiCol_TextDisabled] = text_hint;
-    c[ImGuiCol_Header] = bg_medium;
-    c[ImGuiCol_HeaderHovered] = accent;
-    c[ImGuiCol_HeaderActive] = accent_active;
+    
+    // 复选框
+    c[ImGuiCol_CheckMark] = accent_primary;
+    
+    // 文字
+    c[ImGuiCol_Text] = text_primary;
+    c[ImGuiCol_TextDisabled] = text_disabled;
+    c[ImGuiCol_TextSelectedBg] = ImVec4(accent_primary.x, accent_primary.y, accent_primary.z, 0.35f);
+    
+    // 标题头
+    c[ImGuiCol_Header] = bg_light;
+    c[ImGuiCol_HeaderHovered] = ImVec4(accent_primary.x, accent_primary.y, accent_primary.z, 0.25f);
+    c[ImGuiCol_HeaderActive] = ImVec4(accent_primary.x, accent_primary.y, accent_primary.z, 0.4f);
+    
+    // 标签页
     c[ImGuiCol_Tab] = bg_medium;
     c[ImGuiCol_TabHovered] = accent_hover;
-    c[ImGuiCol_TabActive] = accent;
+    c[ImGuiCol_TabActive] = accent_primary;
     c[ImGuiCol_TabUnfocused] = bg_medium;
     c[ImGuiCol_TabUnfocusedActive] = bg_light;
-    c[ImGuiCol_Separator] = ImVec4(0.20f, 0.20f, 0.25f, 1.0f);
-    c[ImGuiCol_SeparatorHovered] = accent;
+    
+    // 分隔线
+    c[ImGuiCol_Separator] = ImVec4(0.18f, 0.20f, 0.25f, 0.6f);
+    c[ImGuiCol_SeparatorHovered] = accent_primary;
     c[ImGuiCol_SeparatorActive] = accent_hover;
-    c[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.30f, 0.5f);
-    c[ImGuiCol_ScrollbarBg] = bg_medium;
-    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.35f, 0.35f, 0.40f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.45f, 0.45f, 0.50f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.55f, 0.55f, 0.60f, 1.0f);
+    
+    // 边框
+    c[ImGuiCol_Border] = ImVec4(0.22f, 0.24f, 0.30f, 0.45f);
+    c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    
+    // 滚动条
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0.055f, 0.058f, 0.075f, 0.75f);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.30f, 0.38f, 0.85f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.38f, 0.40f, 0.50f, 0.95f);
+    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.48f, 0.50f, 0.62f, 1.0f);
+    
+    // 表格
+    c[ImGuiCol_TableHeaderBg] = bg_medium;
+    c[ImGuiCol_TableBorderStrong] = ImVec4(0.18f, 0.20f, 0.26f, 0.8f);
+    c[ImGuiCol_TableBorderLight] = ImVec4(0.12f, 0.14f, 0.18f, 0.5f);
+    c[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    c[ImGuiCol_TableRowBgAlt] = ImVec4(0.08f, 0.10f, 0.14f, 0.35f);
+    
+    // 拖拽
+    c[ImGuiCol_DragDropTarget] = ImVec4(accent_primary.x, accent_primary.y, accent_primary.z, 0.9f);
+    
+    // 导航高亮
+    c[ImGuiCol_NavHighlight] = accent_primary;
+    c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.0f, 1.0f, 1.0f, 0.7f);
+    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.8f, 0.8f, 0.8f, 0.2f);
+    
+    // 模态窗口遮罩
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.08f, 0.08f, 0.12f, 0.75f);
 
-    // 窗口和控件圆角设置
-    s.WindowRounding = 16.0f;
-    s.ChildRounding = 12.0f;
-    s.FrameRounding = 8.0f;
-    s.GrabRounding = 6.0f;
-    s.TabRounding = 8.0f;
-    s.PopupRounding = 10.0f;
+    // ============================================
+    // 样式配置 - 现代圆角设计
+    // ============================================
     
-    // 内边距和间距设置
-    s.WindowPadding = ImVec2(1, 1);
-    s.FramePadding = ImVec2(12, 8);
-    s.ItemSpacing = ImVec2(12, 8);
-    s.ItemInnerSpacing = ImVec2(8, 6);
-    s.CellPadding = ImVec2(6, 4);
-    s.TouchExtraPadding = ImVec2(2, 2);
+    // 圆角设置 - 统一的圆角风格
+    s.WindowRounding = 18.0f;
+    s.ChildRounding = 14.0f;
+    s.FrameRounding = 10.0f;
+    s.PopupRounding = 12.0f;
+    s.ScrollbarRounding = 9.0f;
+    s.GrabRounding = 8.0f;
+    s.TabRounding = 10.0f;
+    s.LogSliderDeadzone = 4.0f;
     
-    // 边框和滚动条设置
+    // 内边距 - 舒适的间距
+    s.WindowPadding = ImVec2(0, 0);
+    s.FramePadding = ImVec2(14, 10);
+    s.ItemSpacing = ImVec2(14, 10);
+    s.ItemInnerSpacing = ImVec2(10, 8);
+    s.CellPadding = ImVec2(8, 6);
+    s.TouchExtraPadding = ImVec2(4, 4);
+    s.IndentSpacing = 22.0f;
+    s.ColumnsMinSpacing = 8.0f;
+    
+    // 边框 - 精细边框
     s.WindowBorderSize = 1.0f;
-    s.ChildBorderSize = 0.0f;
+    s.ChildBorderSize = 0.5f;
     s.PopupBorderSize = 1.0f;
     s.FrameBorderSize = 0.0f;
     s.TabBorderSize = 0.0f;
     
-    s.ScrollbarSize = 14.0f;
-    s.ScrollbarRounding = 7.0f;
+    // 滚动条
+    s.ScrollbarSize = 16.0f;
     
-    // 其他设置
+    // 窗口最小尺寸
+    s.WindowMinSize = ImVec2(200, 200);
+    
+    // 对齐和位置
+    s.WindowTitleAlign = ImVec2(0.5f, 0.5f);
     s.WindowMenuButtonPosition = ImGuiDir_None;
     s.ColorButtonPosition = ImGuiDir_Right;
     s.ButtonTextAlign = ImVec2(0.5f, 0.5f);
     s.SelectableTextAlign = ImVec2(0.0f, 0.5f);
+    
+    // 安全区域
+    s.DisplaySafeAreaPadding = ImVec2(3.0f, 3.0f);
+    
+    // 抗锯齿
+    s.AntiAliasedLines = true;
+    s.AntiAliasedFill = true;
+    
+    // 曲线细分
+    s.CurveTessellationTol = 1.25f;
+    s.CircleTessellationMaxError = 0.3f;
+    
+    // Alpha 混合
+    s.Alpha = 1.0f;
+    s.DisabledAlpha = 0.58f;
 }
 
 // ==========================================
-// 6. UI Drawing
+// 6. UI Drawing Helper Functions
+// ==========================================
+
+// 绘制渐变矩形
+static void DrawGradientRect(ImDrawList* draw_list, ImVec2 p_min, ImVec2 p_max, ImU32 col_top, ImU32 col_bottom, bool horizontal = false) {
+    if (horizontal) {
+        draw_list->AddRectFilledMultiColor(p_min, p_max, col_top, col_bottom, col_bottom, col_top);
+    } else {
+        draw_list->AddRectFilledMultiColor(p_min, p_max, col_top, col_top, col_bottom, col_bottom);
+    }
+}
+
+// 绘制带阴影的分割线
+static void DrawSeparatorLine(ImDrawList* draw_list, ImVec2 p_min, ImVec2 p_max, float thickness = 1.0f) {
+    ImU32 col_shadow = IM_COL32(0, 0, 0, 40);
+    ImU32 col_line = IM_COL32(45, 50, 65, 120);
+    draw_list->AddLine(ImVec2(p_min.x, p_min.y + 1), ImVec2(p_max.x, p_max.y + 1), col_shadow, thickness + 1.0f);
+    draw_list->AddLine(p_min, p_max, col_line, thickness);
+}
+
+// 绘制卡片背景
+static void DrawCardBackground(ImDrawList* draw_list, ImVec2 p_min, ImVec2 p_max, float rounding = 12.0f) {
+    ImU32 bg_col = IM_COL32(18, 20, 28, 200);
+    ImU32 border_col = IM_COL32(55, 60, 75, 80);
+    draw_list->AddRectFilled(p_min, p_max, bg_col, rounding);
+    draw_list->AddRect(p_min, p_max, border_col, rounding, 0, 1.0f);
+}
+
+// 绘制发光边框
+static void DrawGlowBorder(ImDrawList* draw_list, ImVec2 p_min, ImVec2 p_max, ImU32 glow_color, float rounding = 14.0f) {
+    for (int i = 3; i > 0; i--) {
+        float alpha = (0.15f / i);
+        ImU32 glow = IM_COL32(
+            (glow_color >> 0) & 0xFF,
+            (glow_color >> 8) & 0xFF,
+            (glow_color >> 16) & 0xFF,
+            (int)(alpha * 255)
+        );
+        draw_list->AddRect(
+            ImVec2(p_min.x - i, p_min.y - i),
+            ImVec2(p_max.x + i, p_max.y + i),
+            glow, rounding + i, 0, 1.5f
+        );
+    }
+}
+
+// 绘制圆形按钮
+static bool CircleButton(const char* str_id, ImVec2 center, float radius, ImU32 color, ImU32 hover_color) {
+    ImGui::PushID(str_id);
+    ImGui::SetCursorScreenPos(ImVec2(center.x - radius - 10, center.y - radius - 10));
+    ImGui::InvisibleButton("##btn", ImVec2((radius + 10) * 2, (radius + 10) * 2));
+    
+    bool hovered = ImGui::IsItemHovered();
+    bool clicked = ImGui::IsItemClicked();
+    
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImU32 current_color = hovered ? hover_color : color;
+    
+    // 外发光
+    if (hovered) {
+        for (int i = 4; i > 0; i--) {
+            ImU32 glow = IM_COL32(
+                (hover_color >> 0) & 0xFF,
+                (hover_color >> 8) & 0xFF,
+                (hover_color >> 16) & 0xFF,
+                25 * i
+            );
+            draw_list->AddCircle(center, radius + i * 2, glow, 32, 2.0f);
+        }
+    }
+    
+    // 主圆
+    draw_list->AddCircleFilled(center, radius, current_color, 32);
+    
+    // 内边框
+    ImU32 inner_border = IM_COL32(255, 255, 255, hovered ? 50 : 25);
+    draw_list->AddCircle(center, radius - 1.5f, inner_border, 32, 1.5f);
+    
+    ImGui::PopID();
+    return clicked;
+}
+
+// 绘制精致滑块
+static bool StyledSliderFloat(const char* label, float* v, float v_min, float v_max, const char* format = "%.2f", float width = -1) {
+    ImGui::PushID(label);
+    
+    ImVec2 label_size = ImGui::CalcTextSize(label);
+    float slider_width = (width < 0) ? ImGui::GetContentRegionAvail().x : width;
+    
+    // 标签行
+    ImGui::TextColored(ImVec4(0.58f, 0.60f, 0.68f, 1.0f), "%s", label);
+    ImGui::SameLine(slider_width - 50);
+    ImGui::TextColored(ImVec4(0.72f, 0.74f, 0.80f, 1.0f), "%.2f", *v);
+    
+    ImGui::SetNextItemWidth(slider_width);
+    
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.12f, 0.13f, 0.17f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.16f, 0.22f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.18f, 0.19f, 0.25f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.28f, 0.56f, 0.92f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.35f, 0.65f, 0.98f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 7.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    
+    bool changed = ImGui::SliderFloat("##slider", v, v_min, v_max, "");
+    
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(5);
+    ImGui::PopID();
+    
+    return changed;
+}
+
+// 绘制开关控件
+static bool StyledCheckbox(const char* label, bool* v) {
+    ImGui::PushID(label);
+    
+    ImVec2 pos = ImGui::GetCursorScreenPos();
+    ImVec2 label_size = ImGui::CalcTextSize(label);
+    float height = 28.0f;
+    float width = 52.0f;
+    float radius = height * 0.5f;
+    
+    ImGui::InvisibleButton("##toggle", ImVec2(width + label_size.x + 12, height + 6));
+    bool hovered = ImGui::IsItemHovered();
+    bool changed = ImGui::IsItemClicked();
+    
+    if (changed) *v = !*v;
+    
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    
+    // 背景轨道
+    ImU32 track_color = *v ? IM_COL32(28, 92, 165, 255) : IM_COL32(35, 38, 48, 255);
+    if (hovered) {
+        track_color = *v ? IM_COL32(35, 105, 185, 255) : IM_COL32(45, 48, 60, 255);
+    }
+    
+    // 发光效果
+    if (*v && hovered) {
+        draw_list->AddRectRounded(ImVec2(pos.x - 2, pos.y + 2), ImVec2(pos.x + width + 2, pos.y + height + 4), 
+                                   IM_COL32(35, 105, 185, 60), radius + 2);
+    }
+    
+    draw_list->AddRectFilled(ImVec2(pos.x, pos.y + 3), ImVec2(pos.x + width, pos.y + height + 3), 
+                              track_color, radius);
+    
+    // 滑块
+    float knob_x = *v ? (pos.x + width - radius - 3) : (pos.x + radius + 3);
+    ImU32 knob_color = *v ? IM_COL32(80, 180, 255, 255) : IM_COL32(120, 125, 135, 255);
+    if (hovered) {
+        knob_color = *v ? IM_COL32(100, 200, 255, 255) : IM_COL32(140, 145, 155, 255);
+    }
+    
+    // 滑块发光
+    if (*v) {
+        draw_list->AddCircleFilled(ImVec2(knob_x, pos.y + height / 2 + 3), radius - 1, 
+                                    IM_COL32(80, 180, 255, 80));
+    }
+    
+    draw_list->AddCircleFilled(ImVec2(knob_x, pos.y + height / 2 + 3), radius - 3, knob_color);
+    draw_list->AddCircle(ImVec2(knob_x, pos.y + height / 2 + 3), radius - 3, 
+                          IM_COL32(255, 255, 255, 40), 16, 1.5f);
+    
+    // 标签文字
+    ImGui::SetCursorScreenPos(ImVec2(pos.x + width + 12, pos.y + 6));
+    ImGui::TextColored(*v ? ImVec4(0.95f, 0.96f, 0.98f, 1.0f) : ImVec4(0.65f, 0.68f, 0.75f, 1.0f), "%s", label);
+    
+    ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + height + 12));
+    ImGui::PopID();
+    
+    return changed;
+}
+
+// 绘制预设按钮
+static bool PresetButton(const char* label, bool selected, ImVec2 size) {
+    ImGui::PushID(label);
+    
+    ImU32 bg_normal = IM_COL32(25, 28, 38, 255);
+    ImU32 bg_selected = IM_COL32(35, 90, 170, 255);
+    ImU32 bg_hovered = selected ? IM_COL32(45, 105, 190, 255) : IM_COL32(35, 40, 52, 255);
+    ImU32 text_normal = IM_COL32(160, 165, 175, 255);
+    ImU32 text_selected = IM_COL32(245, 248, 255, 255);
+    
+    ImGui::PushStyleColor(ImGuiCol_Button, selected ? bg_selected : bg_normal);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, bg_hovered);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, bg_selected);
+    ImGui::PushStyleColor(ImGuiCol_Text, selected ? text_selected : text_normal);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, selected ? 1.0f : 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(60, 140, 220, 200));
+    
+    bool clicked = ImGui::Button(label, size);
+    
+    ImGui::PopStyleColor(5);
+    ImGui::PopStyleVar(2);
+    ImGui::PopID();
+    
+    return clicked;
+}
+
+// ==========================================
+// 7. UI Drawing
 // ==========================================
 static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
     ImGuiIO& io = ImGui::GetIO();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-    // Floating Button - 更精致的设计
+    // ============================================
+    // Floating Toggle Button - 精致浮动按钮
+    // ============================================
     if (!g_ShowUI) {
-        ImGui::SetNextWindowPos(ImVec2(20, io.DisplaySize.y * 0.5f), ImGuiCond_Always);
-        ImGui::Begin("##Reopen", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoFocusOnAppearing);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 40.0f);
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.40f, 0.75f, 0.95f, 0.95f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.50f, 0.85f, 1.0f, 1.0f));
-        if (ImGui::Button(" RF ", ImVec2(60, 60))) g_ShowUI = true;
-        ImGui::PopStyleColor(2);
-        ImGui::PopStyleVar();
-        ImGui::End();
+        ImVec2 center(30, io.DisplaySize.y * 0.5f);
+        
+        // 发光背景
+        for (int i = 5; i > 0; i--) {
+            draw_list->AddCircleFilled(center, 28 + i * 3, IM_COL32(28, 92, 175, 15 * i));
+        }
+        
+        ImU32 btn_color = IM_COL32(35, 95, 175, 240);
+        ImU32 btn_hover = IM_COL32(50, 120, 200, 255);
+        
+        // 检测点击
+        ImGui::SetCursorScreenPos(ImVec2(center.x - 35, center.y - 35));
+        ImGui::InvisibleButton("##toggle_main", ImVec2(70, 70));
+        bool hovered = ImGui::IsItemHovered();
+        bool clicked = ImGui::IsItemClicked();
+        
+        // 主按钮
+        ImU32 current_color = hovered ? btn_hover : btn_color;
+        draw_list->AddCircleFilled(center, 26, current_color, 32);
+        
+        // 内发光边框
+        draw_list->AddCircle(center, 25, IM_COL32(255, 255, 255, hovered ? 60 : 30), 32, 2.0f);
+        
+        // RF 文字
+        ImVec2 text_size = ImGui::CalcTextSize("RF");
+        draw_list->AddText(ImVec2(center.x - text_size.x / 2, center.y - text_size.y / 2 - 1), 
+                           IM_COL32(255, 255, 255, 255), "RF");
+        
+        if (clicked) g_ShowUI = true;
+        
         if (g_UIFont) ImGui::PopFont();
         return;
     }
 
-    // Main Window - 增加窗口宽度以改善文字显示
-    ImGui::SetNextWindowSize(ImVec2(520, 650), ImGuiCond_FirstUseEver);
+    // ============================================
+    // Main Window - 主窗口
+    // ============================================
+    ImGui::SetNextWindowSize(ImVec2(480, 680), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
-    ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
-
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 20.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.042f, 0.055f, 0.97f));
+    
+    ImGui::Begin("##MainWindow", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
+    
+    ImVec2 win_pos = ImGui::GetWindowPos();
     ImVec2 win_size = ImGui::GetWindowSize();
     
-    // Header with enhanced background
-    ImGui::GetWindowDrawList()->AddRectFilled(
-        ImVec2(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y),
-        ImVec2(ImGui::GetWindowPos().x + win_size.x, ImGui::GetWindowPos().y + 60),
-        IM_COL32(15, 15, 20, 255)
-    );
+    // ============================================
+    // Header - 标题栏
+    // ============================================
+    // 渐变背景
+    DrawGradientRect(draw_list, 
+                     ImVec2(win_pos.x, win_pos.y),
+                     ImVec2(win_pos.x + win_size.x, win_pos.y + 72),
+                     IM_COL32(12, 14, 20, 255),
+                     IM_COL32(20, 22, 30, 255));
     
-    ImGui::SetCursorPos(ImVec2(20, 18));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
+    // 底部分割线
+    DrawSeparatorLine(draw_list, 
+                      ImVec2(win_pos.x + 20, win_pos.y + 72),
+                      ImVec2(win_pos.x + win_size.x - 20, win_pos.y + 72));
+    
+    // Logo 标题
+    ImGui::SetCursorPos(ImVec2(22, 22));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.62f, 0.95f, 1.0f));
     ImGui::TextUnformatted("RenderFusion");
     ImGui::PopStyleColor();
     
-    ImGui::SameLine(win_size.x - 56);
-    ImGui::SetCursorPosY(14);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-    if (ImGui::Button(" X ", ImVec2(36, 32))) g_ShowUI = false;
-    ImGui::PopStyleVar();
+    // 副标题
+    ImGui::SetCursorPos(ImVec2(22, 44));
+    ImGui::TextColored(ImVec4(0.45f, 0.48f, 0.55f, 1.0f), "Advanced Filter Engine");
     
-    ImGui::SetCursorPosY(64);
-
-    // Focus point click logic
-    // Removed DOF focus point logic since DOF feature is removed
+    // 关闭按钮
+    ImVec2 close_center(win_pos.x + win_size.x - 32, win_pos.y + 36);
+    ImGui::SetCursorScreenPos(ImVec2(close_center.x - 18, close_center.y - 18));
+    ImGui::InvisibleButton("##close", ImVec2(36, 36));
+    bool close_hovered = ImGui::IsItemHovered();
+    bool close_clicked = ImGui::IsItemClicked();
     
-    // 主内容区 - 增加底部空间以适应更多内容
-    ImGui::BeginChild("MainContent", ImVec2(0, -60), false, ImGuiWindowFlags_NoBackground);
-
-    // 预设按钮 - 横向排列
-    ImGui::SetCursorPosX(16);
-    ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Presets");
-    ImGui::Dummy(ImVec2(0, 8));
+    if (close_clicked) g_ShowUI = false;
     
-    ImGui::SetCursorPosX(16);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 0));
+    ImU32 close_bg = close_hovered ? IM_COL32(180, 60, 70, 200) : IM_COL32(40, 42, 50, 180);
+    draw_list->AddCircleFilled(close_center, 14, close_bg, 24);
+    draw_list->AddText(ImVec2(close_center.x - 4, close_center.y - 7), 
+                       IM_COL32(255, 255, 255, close_hovered ? 255 : 180), "X");
+    
+    ImGui::SetCursorPosY(80);
+    
+    // ============================================
+    // Presets Section - 预设区域
+    // ============================================
+    ImGui::SetCursorPosX(20);
+    ImGui::TextColored(ImVec4(0.50f, 0.52f, 0.58f, 1.0f), "PRESETS");
+    
+    ImGui::SetCursorPosX(20);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8);
     
     const char* preset_names[] = {"Original", "Manga B&W"};
+    float btn_width = (win_size.x - 50) / 2.0f;
+    
     for (int i = 0; i < 2; i++) {
-        bool is_selected = (RF::current_preset == i);
-        if (is_selected) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.18f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.70f, 0.75f, 1.0f));
-        }
-        
-        if (ImGui::Button(preset_names[i], ImVec2(240, 40))) {  // 增加按钮大小以改善可点击区域
+        ImGui::SetCursorPosX(20 + i * (btn_width + 10));
+        if (PresetButton(preset_names[i], RF::current_preset == i, ImVec2(btn_width, 44))) {
             RF::current_preset = i;
             RF::ApplyPreset(i);
-            Config::SaveConfig(); // Save config when preset is changed
+            Config::SaveConfig();
+        }
+        if (i == 0) {
+            ImGui::SameLine();
+        }
+    }
+    
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 16);
+    
+    // 分隔线
+    ImGui::SetCursorPosX(20);
+    ImVec2 sep_start = ImGui::GetCursorScreenPos();
+    DrawSeparatorLine(draw_list, sep_start, ImVec2(sep_start.x + win_size.x - 40, sep_start.y));
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 16);
+    
+    // ============================================
+    // Tabs Content - 标签页内容
+    // ============================================
+    ImGui::BeginChild("##Content", ImVec2(win_size.x - 8, win_size.y - 220), false, ImGuiWindowFlags_NoBackground);
+    
+    if (ImGui::BeginTabBar("##Tabs", ImGuiTabBarFlags_None)) {
+        
+        // ------------------------------------
+        // Adjust Tab - 基础调整
+        // ------------------------------------
+        if (ImGui::BeginTabItem("Adjust")) {
+            ImGui::SetCursorPosY(12);
+            
+            // Master开关
+            if (StyledCheckbox("Enable Master", &RF::params.enable_master)) {
+                Config::SaveConfig();
+            }
+            
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8);
+            
+            // 滑块区域
+            float slider_width = win_size.x - 50;
+            
+            if (StyledSliderFloat("Brightness", &RF::params.brightness, -0.5f, 0.5f, "%.2f", slider_width)) {
+                Config::SaveConfig();
+            }
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4);
+            
+            if (StyledSliderFloat("Contrast", &RF::params.contrast, 0.6f, 1.8f, "%.2f", slider_width)) {
+                Config::SaveConfig();
+            }
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4);
+            
+            if (StyledSliderFloat("Saturation", &RF::params.saturation, 0.0f, 2.0f, "%.2f", slider_width)) {
+                Config::SaveConfig();
+            }
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4);
+            
+            if (StyledSliderFloat("Temperature", &RF::params.temperature, -1.0f, 1.0f, "%.2f", slider_width)) {
+                Config::SaveConfig();
+            }
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4);
+            
+            if (StyledSliderFloat("Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f", slider_width)) {
+                Config::SaveConfig();
+            }
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4);
+            
+            if (StyledSliderFloat("Film Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f", slider_width)) {
+                Config::SaveConfig();
+            }
+            
+            ImGui::EndTabItem();
         }
         
-        ImGui::PopStyleColor(2);
-        if (i < 1) ImGui::SameLine();
-    }
-    ImGui::PopStyleVar(2);
-    
-    ImGui::Dummy(ImVec2(0, 16));
-
-    // Tabs 区域
-    ImGui::BeginChild("TabsArea", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
-    
-    if (ImGui::BeginTabBar("ControlTabs", ImGuiTabBarFlags_None)) {
-        // Adjust Tab - 改进滑块标签显示
-        if (ImGui::BeginTabItem("Adjust")) {
-            ImGui::Dummy(ImVec2(0, 8));
-            if (ImGui::Checkbox("Enable Master Adjustments", &RF::params.enable_master)) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            ImGui::Dummy(ImVec2(0, 10));
-            ImGui::PushItemWidth(-15);  // 增加滑块宽度
-            
-            // 紧凑的滑块布局 - 改进标签文字和布局
-            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Brightness");
-            if (ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f")) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            ImGui::Dummy(ImVec2(0, 6));
-            
-            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Contrast");
-            if (ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f")) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            ImGui::Dummy(ImVec2(0, 6));
-            
-            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Saturation");
-            if (ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f")) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            ImGui::Dummy(ImVec2(0, 6));
-            
-            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Temperature");
-            if (ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f")) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            ImGui::Dummy(ImVec2(0, 6));
-            
-            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Vignette");
-            if (ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f")) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            ImGui::Dummy(ImVec2(0, 6));
-            
-            ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Film Grain");
-            if (ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f")) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            
-            ImGui::PopItemWidth();
-            ImGui::EndTabItem();
-        }
-
-        // Stylize Tab - 优化艺术风格部分的布局
+        // ------------------------------------
+        // Stylize Tab - 艺术风格
+        // ------------------------------------
         if (ImGui::BeginTabItem("Stylize")) {
-            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::SetCursorPosY(12);
             
-            // Art Style
-            ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Art Style");
+            // Art Style 选择
+            ImGui::SetCursorPosX(20);
+            ImGui::TextColored(ImVec4(0.50f, 0.52f, 0.58f, 1.0f), "ART STYLE");
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8);
+            
+            ImGui::SetCursorPosX(20);
+            ImGui::SetNextItemWidth(win_size.x - 50);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.12f, 0.13f, 0.17f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+            
             const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic"};
-            ImGui::SetNextItemWidth(-15);
             if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
-                // 切换艺术风格时重置强度
-                if (RF::params.art_style > 0) {
-                    RF::params.art_intensity = 1.0f;
-                }
-                Config::SaveConfig(); // Save config when changed
+                if (RF::params.art_style > 0) RF::params.art_intensity = 1.0f;
+                Config::SaveConfig();
             }
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
             
+            // 艺术风格强度
             if (RF::params.art_style > 0) {
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8);
+                if (StyledSliderFloat("Intensity", &RF::params.art_intensity, 0.0f, 1.0f, "%.2f", win_size.x - 50)) {
+                    Config::SaveConfig();
                 }
-                ImGui::TextColored(ImVec4(0.45f, 0.45f, 0.50f, 1.0f), "%s effect applied", art_styles[RF::params.art_style]);
+                
+                ImGui::SetCursorPosX(20);
+                ImGui::TextColored(ImVec4(0.40f, 0.70f, 0.95f, 0.9f), "  %s applied", art_styles[RF::params.art_style]);
             }
             
-            ImGui::Dummy(ImVec2(0, 12));
-            ImGui::Separator();
-            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 12);
+            
+            // 分隔线
+            ImGui::SetCursorPosX(20);
+            ImVec2 s_pos = ImGui::GetCursorScreenPos();
+            DrawSeparatorLine(draw_list, s_pos, ImVec2(s_pos.x + win_size.x - 50, s_pos.y));
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 12);
             
             // Manga B&W
-            if (ImGui::Checkbox("Manga B&W", &RF::params.enable_bw)) {
-                Config::SaveConfig(); // Save config when changed
+            if (StyledCheckbox("Manga B&W", &RF::params.enable_bw)) {
+                Config::SaveConfig();
             }
             if (RF::params.enable_bw) {
-                ImGui::TextColored(ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "Comic-style high contrast B&W");
+                ImGui::SetCursorPosX(72);
+                ImGui::TextColored(ImVec4(0.45f, 0.48f, 0.55f, 1.0f), "High contrast comic style");
             }
             
-            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8);
             
             // Sepia
-            if (ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia)) {
-                Config::SaveConfig(); // Save config when changed
+            if (StyledCheckbox("Vintage Sepia", &RF::params.enable_sepia)) {
+                Config::SaveConfig();
             }
             if (RF::params.enable_sepia) {
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
+                if (StyledSliderFloat("Sepia Intensity", &RF::params.sepia_intensity, 0.0f, 1.0f, "%.2f", win_size.x - 50)) {
+                    Config::SaveConfig();
                 }
             }
             
-            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8);
             
             // Outline
-            if (ImGui::Checkbox("Black Outline", &RF::params.enable_outline)) {
-                Config::SaveConfig(); // Save config when changed
+            if (StyledCheckbox("Black Outline", &RF::params.enable_outline)) {
+                Config::SaveConfig();
             }
             if (RF::params.enable_outline) {
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Threshold: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
+                if (StyledSliderFloat("Threshold", &RF::params.outline_thresh, 0.05f, 0.5f, "%.2f", win_size.x - 50)) {
+                    Config::SaveConfig();
                 }
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-            }
-
-            ImGui::EndTabItem();
-        }
-
-        // Effects Tab - 优化效果标签页的布局
-        if (ImGui::BeginTabItem("Effects")) {
-            ImGui::Dummy(ImVec2(0, 8));
-            if (ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen)) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            if (RF::params.enable_sharpen) {
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
+                if (StyledSliderFloat("Opacity", &RF::params.outline_opacity, 0.0f, 1.0f, "%.2f", win_size.x - 50)) {
+                    Config::SaveConfig();
                 }
             }
             
-            ImGui::Dummy(ImVec2(0, 12));
-            if (ImGui::Checkbox("TikTok RGB Split", &RF::params.enable_tiktok)) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            if (RF::params.enable_tiktok) {
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-                ImGui::SetNextItemWidth(-15);
-                if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-            }
             ImGui::EndTabItem();
         }
-
+        
+        // ------------------------------------
+        // Effects Tab - 特效
+        // ------------------------------------
+        if (ImGui::BeginTabItem("Effects")) {
+            ImGui::SetCursorPosY(12);
+            
+            // Sharpen
+            if (StyledCheckbox("Sharpen", &RF::params.enable_sharpen)) {
+                Config::SaveConfig();
+            }
+            if (RF::params.enable_sharpen) {
+                if (StyledSliderFloat("Sharpness", &RF::params.sharpen_intensity, 0.0f, 1.5f, "%.2f", win_size.x - 50)) {
+                    Config::SaveConfig();
+                }
+            }
+            
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 12);
+            
+            // TikTok RGB
+            if (StyledCheckbox("TikTok RGB Split", &RF::params.enable_tiktok)) {
+                Config::SaveConfig();
+            }
+            if (RF::params.enable_tiktok) {
+                if (StyledSliderFloat("Offset", &RF::params.tiktok_offset, 0.0f, 0.05f, "%.3f", win_size.x - 50)) {
+                    Config::SaveConfig();
+                }
+                if (StyledSliderFloat("RGB Intensity", &RF::params.tiktok_intensity, 0.0f, 1.0f, "%.2f", win_size.x - 50)) {
+                    Config::SaveConfig();
+                }
+            }
+            
+            ImGui::EndTabItem();
+        }
+        
         ImGui::EndTabBar();
     }
-
+    
     ImGui::EndChild();
-    ImGui::EndChild();
-
-    // Bottom buttons - 调整按钮位置和大小
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 52);
-    ImGui::SetCursorPosX((win_size.x - 280) * 0.5f); // Center buttons
+    
+    // ============================================
+    // Bottom Buttons - 底部按钮
+    // ============================================
+    ImVec2 bottom_pos(win_pos.x, win_pos.y + win_size.y - 68);
+    
+    // 底部背景
+    DrawGradientRect(draw_list,
+                     ImVec2(bottom_pos.x, bottom_pos.y),
+                     ImVec2(bottom_pos.x + win_size.x, bottom_pos.y + 68),
+                     IM_COL32(15, 17, 23, 255),
+                     IM_COL32(10, 12, 18, 255));
+    
+    // 顶部边框
+    DrawSeparatorLine(draw_list,
+                      ImVec2(bottom_pos.x + 20, bottom_pos.y),
+                      ImVec2(bottom_pos.x + win_size.x - 20, bottom_pos.y));
+    
+    // 按钮区域
+    float btn_w = 140;
+    float btn_h = 44;
+    float btn_spacing = 16;
+    float total_width = btn_w * 2 + btn_spacing;
+    float start_x = (win_size.x - total_width) / 2;
+    
+    ImGui::SetCursorPos(ImVec2(start_x, win_size.y - 58));
+    
+    // Save Button
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(35, 95, 170, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(50, 115, 195, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(30, 80, 150, 255));
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(245, 248, 255, 255));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
     
-    // Save Config Button
-    if (ImGui::Button("Save Config", ImVec2(130, 38))) {
+    if (ImGui::Button("Save Config", ImVec2(btn_w, btn_h))) {
         Config::SaveConfig();
     }
-    ImGui::SameLine();
     
-    // Reset All Button
-    if (ImGui::Button("Reset All", ImVec2(130, 38))) {
+    ImGui::SameLine(0, btn_spacing);
+    
+    // Reset Button
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(45, 48, 58, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 65, 78, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(38, 42, 52, 255));
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(160, 165, 175, 255));
+    
+    if (ImGui::Button("Reset All", ImVec2(btn_w, btn_h))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
-        Config::SaveConfig(); // Save the default configuration
+        Config::SaveConfig();
     }
+    
+    ImGui::PopStyleColor(8);
     ImGui::PopStyleVar();
-
+    
+    // ============================================
+    // Window Border Glow - 窗口边框发光
+    // ============================================
+    ImU32 glow_color = IM_COL32(35, 95, 175, 60);
+    draw_list->AddRect(ImVec2(win_pos.x - 1, win_pos.y - 1), 
+                       ImVec2(win_pos.x + win_size.x + 1, win_pos.y + win_size.y + 1),
+                       glow_color, 20.0f, 0, 1.5f);
+    
     ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
     
     if (g_UIFont) ImGui::PopFont();
 }
