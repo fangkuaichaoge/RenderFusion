@@ -1270,54 +1270,80 @@ static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    // 现代深色主题配色
-    ImVec4 bg_dark(0.08f, 0.08f, 0.10f, 0.96f);
-    ImVec4 bg_medium(0.12f, 0.12f, 0.15f, 1.0f);
-    ImVec4 bg_light(0.18f, 0.18f, 0.22f, 1.0f);
-    ImVec4 accent(0.40f, 0.75f, 0.95f, 1.0f);      // 青蓝色主题色
-    ImVec4 accent_hover(0.50f, 0.85f, 1.0f, 1.0f);
-    ImVec4 accent_active(0.30f, 0.65f, 0.85f, 1.0f);
-    ImVec4 text_main(0.95f, 0.95f, 0.97f, 1.0f);
-    ImVec4 text_dim(0.60f, 0.60f, 0.65f, 1.0f);
+    // 现代深色主题配色 - 更加精致的配色方案
+    ImVec4 bg_dark(0.06f, 0.06f, 0.08f, 0.97f);      // 深色背景
+    ImVec4 bg_medium(0.10f, 0.10f, 0.13f, 1.0f);     // 中等深色背景
+    ImVec4 bg_light(0.14f, 0.14f, 0.17f, 1.0f);      // 浅色背景
+    ImVec4 accent(0.30f, 0.60f, 0.90f, 1.0f);        // 蓝色主题色（更柔和）
+    ImVec4 accent_hover(0.40f, 0.70f, 1.0f, 1.0f);   // 悬停时的强调色
+    ImVec4 accent_active(0.20f, 0.50f, 0.80f, 1.0f); // 激活时的强调色
+    ImVec4 text_main(0.98f, 0.98f, 1.00f, 1.0f);     // 主要文本颜色
+    ImVec4 text_dim(0.65f, 0.65f, 0.70f, 1.0f);      // 次要文本颜色
+    ImVec4 text_hint(0.45f, 0.45f, 0.50f, 1.0f);     // 提示文本颜色
 
     c[ImGuiCol_WindowBg] = bg_dark;
-    c[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.10f, 0.13f, 1.0f);
-    c[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.16f, 1.0f);
+    c[ImGuiCol_ChildBg] = ImVec4(0.08f, 0.08f, 0.11f, 1.0f);
+    c[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.11f, 0.95f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.10f, 0.10f, 0.14f, 1.0f);
     c[ImGuiCol_FrameBg] = bg_light;
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.22f, 0.28f, 1.0f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.28f, 0.35f, 1.0f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.18f, 0.18f, 0.24f, 1.0f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.22f, 0.22f, 0.29f, 1.0f);
     c[ImGuiCol_Button] = bg_light;
-    c[ImGuiCol_ButtonHovered] = accent;
+    c[ImGuiCol_ButtonHovered] = accent_hover;
     c[ImGuiCol_ButtonActive] = accent_active;
     c[ImGuiCol_SliderGrab] = accent;
     c[ImGuiCol_SliderGrabActive] = accent_hover;
     c[ImGuiCol_CheckMark] = accent;
     c[ImGuiCol_Text] = text_main;
-    c[ImGuiCol_TextDisabled] = text_dim;
-    c[ImGuiCol_Header] = bg_light;
+    c[ImGuiCol_TextDisabled] = text_hint;
+    c[ImGuiCol_Header] = bg_medium;
     c[ImGuiCol_HeaderHovered] = accent;
     c[ImGuiCol_HeaderActive] = accent_active;
     c[ImGuiCol_Tab] = bg_medium;
-    c[ImGuiCol_TabHovered] = accent;
-    c[ImGuiCol_TabActive] = accent_active;
+    c[ImGuiCol_TabHovered] = accent_hover;
+    c[ImGuiCol_TabActive] = accent;
     c[ImGuiCol_TabUnfocused] = bg_medium;
     c[ImGuiCol_TabUnfocusedActive] = bg_light;
-    c[ImGuiCol_Separator] = ImVec4(0.25f, 0.25f, 0.30f, 1.0f);
-    c[ImGuiCol_Border] = ImVec4(0.20f, 0.20f, 0.25f, 0.8f);
+    c[ImGuiCol_Separator] = ImVec4(0.20f, 0.20f, 0.25f, 1.0f);
+    c[ImGuiCol_SeparatorHovered] = accent;
+    c[ImGuiCol_SeparatorActive] = accent_hover;
+    c[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.30f, 0.5f);
+    c[ImGuiCol_ScrollbarBg] = bg_medium;
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.35f, 0.35f, 0.40f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.45f, 0.45f, 0.50f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.55f, 0.55f, 0.60f, 1.0f);
 
-    s.WindowRounding = 20.0f;
-    s.ChildRounding = 14.0f;
-    s.FrameRounding = 10.0f;
-    s.GrabRounding = 8.0f;
-    s.TabRounding = 10.0f;
-    s.WindowPadding = ImVec2(0, 0);
-    s.FramePadding = ImVec2(14, 8);
-    s.ItemSpacing = ImVec2(10, 6);
+    // 窗口和控件圆角设置
+    s.WindowRounding = 16.0f;
+    s.ChildRounding = 12.0f;
+    s.FrameRounding = 8.0f;
+    s.GrabRounding = 6.0f;
+    s.TabRounding = 8.0f;
+    s.PopupRounding = 10.0f;
+    
+    // 内边距和间距设置
+    s.WindowPadding = ImVec2(1, 1);
+    s.FramePadding = ImVec2(12, 8);
+    s.ItemSpacing = ImVec2(12, 8);
     s.ItemInnerSpacing = ImVec2(8, 6);
+    s.CellPadding = ImVec2(6, 4);
+    s.TouchExtraPadding = ImVec2(2, 2);
+    
+    // 边框和滚动条设置
     s.WindowBorderSize = 1.0f;
     s.ChildBorderSize = 0.0f;
-    s.ScrollbarRounding = 12.0f;
-    s.ScrollbarSize = 12.0f;
+    s.PopupBorderSize = 1.0f;
+    s.FrameBorderSize = 0.0f;
+    s.TabBorderSize = 0.0f;
+    
+    s.ScrollbarSize = 14.0f;
+    s.ScrollbarRounding = 7.0f;
+    
+    // 其他设置
+    s.WindowMenuButtonPosition = ImGuiDir_None;
+    s.ColorButtonPosition = ImGuiDir_Right;
+    s.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+    s.SelectableTextAlign = ImVec2(0.0f, 0.5f);
 }
 
 // ==========================================
@@ -1342,44 +1368,44 @@ static void DrawUI() {
         return;
     }
 
-    // Main Window - 更紧凑的尺寸
-    ImGui::SetNextWindowSize(ImVec2(480, 600), ImGuiCond_FirstUseEver);
+    // Main Window - 增加窗口宽度以改善文字显示
+    ImGui::SetNextWindowSize(ImVec2(520, 650), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
 
     ImVec2 win_size = ImGui::GetWindowSize();
     
-    // Header with darker background
+    // Header with enhanced background
     ImGui::GetWindowDrawList()->AddRectFilled(
         ImVec2(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y),
-        ImVec2(ImGui::GetWindowPos().x + win_size.x, ImGui::GetWindowPos().y + 50),
+        ImVec2(ImGui::GetWindowPos().x + win_size.x, ImGui::GetWindowPos().y + 60),
         IM_COL32(15, 15, 20, 255)
     );
     
-    ImGui::SetCursorPos(ImVec2(20, 14));
+    ImGui::SetCursorPos(ImVec2(20, 18));
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
     ImGui::TextUnformatted("RenderFusion");
     ImGui::PopStyleColor();
     
     ImGui::SameLine(win_size.x - 56);
-    ImGui::SetCursorPosY(10);
+    ImGui::SetCursorPosY(14);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
     if (ImGui::Button(" X ", ImVec2(36, 32))) g_ShowUI = false;
     ImGui::PopStyleVar();
     
-    ImGui::SetCursorPosY(54);
+    ImGui::SetCursorPosY(64);
 
     // Focus point click logic
     // Removed DOF focus point logic since DOF feature is removed
-
-    // 主内容区
-    ImGui::BeginChild("MainContent", ImVec2(0, -55), false, ImGuiWindowFlags_NoBackground);
+    
+    // 主内容区 - 增加底部空间以适应更多内容
+    ImGui::BeginChild("MainContent", ImVec2(0, -60), false, ImGuiWindowFlags_NoBackground);
 
     // 预设按钮 - 横向排列
     ImGui::SetCursorPosX(16);
     ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Presets");
-    ImGui::Dummy(ImVec2(0, 6));
+    ImGui::Dummy(ImVec2(0, 8));
     
     ImGui::SetCursorPosX(16);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
@@ -1396,7 +1422,7 @@ static void DrawUI() {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.70f, 0.75f, 1.0f));
         }
         
-        if (ImGui::Button(preset_names[i], ImVec2(210, 36))) {
+        if (ImGui::Button(preset_names[i], ImVec2(240, 40))) {  // 增加按钮大小以改善可点击区域
             RF::current_preset = i;
             RF::ApplyPreset(i);
             Config::SaveConfig(); // Save config when preset is changed
@@ -1413,45 +1439,45 @@ static void DrawUI() {
     ImGui::BeginChild("TabsArea", ImVec2(0, 0), false, ImGuiWindowFlags_NoBackground);
     
     if (ImGui::BeginTabBar("ControlTabs", ImGuiTabBarFlags_None)) {
-        // Adjust Tab
+        // Adjust Tab - 改进滑块标签显示
         if (ImGui::BeginTabItem("Adjust")) {
             ImGui::Dummy(ImVec2(0, 8));
-            if (ImGui::Checkbox("Enable", &RF::params.enable_master)) {
+            if (ImGui::Checkbox("Enable Master Adjustments", &RF::params.enable_master)) {
                 Config::SaveConfig(); // Save config when changed
             }
             ImGui::Dummy(ImVec2(0, 10));
-            ImGui::PushItemWidth(-20);
+            ImGui::PushItemWidth(-15);  // 增加滑块宽度
             
-            // 紧凑的滑块布局
+            // 紧凑的滑块布局 - 改进标签文字和布局
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Brightness");
             if (ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f")) {
                 Config::SaveConfig(); // Save config when changed
             }
-            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::Dummy(ImVec2(0, 6));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Contrast");
             if (ImGui::SliderFloat("##Cont", &RF::params.contrast, 0.6f, 1.8f, "%.2f")) {
                 Config::SaveConfig(); // Save config when changed
             }
-            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::Dummy(ImVec2(0, 6));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Saturation");
             if (ImGui::SliderFloat("##Sat", &RF::params.saturation, 0.0f, 2.0f, "%.2f")) {
                 Config::SaveConfig(); // Save config when changed
             }
-            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::Dummy(ImVec2(0, 6));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Temperature");
             if (ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f")) {
                 Config::SaveConfig(); // Save config when changed
             }
-            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::Dummy(ImVec2(0, 6));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Vignette");
             if (ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f")) {
                 Config::SaveConfig(); // Save config when changed
             }
-            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::Dummy(ImVec2(0, 6));
             
             ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.65f, 1.0f), "Film Grain");
             if (ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f")) {
@@ -1462,13 +1488,14 @@ static void DrawUI() {
             ImGui::EndTabItem();
         }
 
-        // Stylize Tab
+        // Stylize Tab - 优化艺术风格部分的布局
         if (ImGui::BeginTabItem("Stylize")) {
+            ImGui::Dummy(ImVec2(0, 8));
             
             // Art Style
             ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Art Style");
             const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic"};
-            ImGui::SetNextItemWidth(-20);
+            ImGui::SetNextItemWidth(-15);
             if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
                 // 切换艺术风格时重置强度
                 if (RF::params.art_style > 0) {
@@ -1478,16 +1505,16 @@ static void DrawUI() {
             }
             
             if (RF::params.art_style > 0) {
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
                 ImGui::TextColored(ImVec4(0.45f, 0.45f, 0.50f, 1.0f), "%s effect applied", art_styles[RF::params.art_style]);
             }
             
-            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::Dummy(ImVec2(0, 12));
             ImGui::Separator();
-            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Dummy(ImVec2(0, 10));
             
             // Manga B&W
             if (ImGui::Checkbox("Manga B&W", &RF::params.enable_bw)) {
@@ -1497,31 +1524,31 @@ static void DrawUI() {
                 ImGui::TextColored(ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "Comic-style high contrast B&W");
             }
             
-            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Dummy(ImVec2(0, 10));
             
             // Sepia
             if (ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia)) {
                 Config::SaveConfig(); // Save config when changed
             }
             if (RF::params.enable_sepia) {
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
             }
             
-            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Dummy(ImVec2(0, 10));
             
             // Outline
             if (ImGui::Checkbox("Black Outline", &RF::params.enable_outline)) {
                 Config::SaveConfig(); // Save config when changed
             }
             if (RF::params.enable_outline) {
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Threshold: %.2f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
@@ -1530,29 +1557,29 @@ static void DrawUI() {
             ImGui::EndTabItem();
         }
 
-        // Effects Tab
+        // Effects Tab - 优化效果标签页的布局
         if (ImGui::BeginTabItem("Effects")) {
             ImGui::Dummy(ImVec2(0, 8));
             if (ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen)) {
                 Config::SaveConfig(); // Save config when changed
             }
             if (RF::params.enable_sharpen) {
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
             }
             
-            ImGui::Dummy(ImVec2(0, 10));
+            ImGui::Dummy(ImVec2(0, 12));
             if (ImGui::Checkbox("TikTok RGB Split", &RF::params.enable_tiktok)) {
                 Config::SaveConfig(); // Save config when changed
             }
             if (RF::params.enable_tiktok) {
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
-                ImGui::SetNextItemWidth(-20);
+                ImGui::SetNextItemWidth(-15);
                 if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) {
                     Config::SaveConfig(); // Save config when changed
                 }
@@ -1560,27 +1587,25 @@ static void DrawUI() {
             ImGui::EndTabItem();
         }
 
-
-
         ImGui::EndTabBar();
     }
 
     ImGui::EndChild();
     ImGui::EndChild();
 
-    // Bottom buttons
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 48);
-    ImGui::SetCursorPosX((win_size.x - 260) * 0.5f); // Center two buttons with 260px total width
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    // Bottom buttons - 调整按钮位置和大小
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 52);
+    ImGui::SetCursorPosX((win_size.x - 280) * 0.5f); // Center buttons
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
     
     // Save Config Button
-    if (ImGui::Button("Save Config", ImVec2(120, 34))) {
+    if (ImGui::Button("Save Config", ImVec2(130, 38))) {
         Config::SaveConfig();
     }
     ImGui::SameLine();
     
     // Reset All Button
-    if (ImGui::Button("Reset All", ImVec2(120, 34))) {
+    if (ImGui::Button("Reset All", ImVec2(130, 38))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
         Config::SaveConfig(); // Save the default configuration
