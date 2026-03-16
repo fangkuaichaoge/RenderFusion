@@ -1237,18 +1237,42 @@ void RenderFilters(int w, int h) {
         // Apply DOF as the final effect to preserve focus point
         GLuint original_tex = final_tex;  // This is the texture after all other filters
         
-        // Perform blur pass on the current texture to create the blurred version
-        GLuint blur_dst_fbo = (original_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint blur_dst_tex = (original_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        if (original_tex == RF::screen_tex) { blur_dst_fbo = RF::fbo; blur_dst_tex = RF::fbo_tex; }
+        // Ensure we have a separate texture to store the blurred version
+        // Use ping-pong FBOs to avoid modifying the original
+        GLuint temp_tex, blur_tex;
+        GLuint temp_fbo, blur_fbo;
         
-        // Blur Pass 1: Horizontal
-        glBindFramebuffer(GL_FRAMEBUFFER, blur_dst_fbo);
-        BindQuad(RF::prog_gaussian);
+        // Determine which FBOs to use based on current final_tex
+        if (original_tex == RF::fbo_tex) {
+            temp_fbo = RF::fbo2;
+            temp_tex = RF::fbo_tex2;
+            blur_fbo = RF::fbo;  // Use the other one for blur
+            blur_tex = RF::fbo_tex;
+        } else {
+            temp_fbo = RF::fbo;
+            temp_tex = RF::fbo_tex;
+            blur_fbo = RF::fbo2;  // Use the other one for blur
+            blur_tex = RF::fbo_tex2;
+        }
+        
+        // Step 1: Copy original (processed) texture to temp texture to preserve it
+        glBindFramebuffer(GL_FRAMEBUFFER, temp_fbo);
+        BindQuad(RF::prog_base);  // Use base shader for simple copy
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, original_tex);
         
-        GLint loc;
+        GLint loc = glGetUniformLocation(RF::prog_base, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        CHECK_GL_ERROR();
+        
+        // Step 2: Blur the original texture to create the background blur
+        glBindFramebuffer(GL_FRAMEBUFFER, blur_fbo);
+        BindQuad(RF::prog_gaussian);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, original_tex);  // Blur the processed texture
+        
         loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
         SAFE_UNIFORM(loc, glUniform1i, 0);
         loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
@@ -1256,19 +1280,20 @@ void RenderFilters(int w, int h) {
         loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
         SAFE_UNIFORM(loc, glUniform2f, 1.0f, 0.0f);
         loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 2.0f);  // Adjust blur strength
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint blurred_tex = blur_dst_tex;
-
-        // Blur Pass 2: Vertical
-        GLuint blur2_dst_fbo = (blurred_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint blur2_dst_tex = (blurred_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        CHECK_GL_ERROR();
         
-        glBindFramebuffer(GL_FRAMEBUFFER, blur2_dst_fbo);
+        // Step 3: Apply vertical blur pass to the already horizontally blurred image
+        GLuint next_blur_fbo = (blur_fbo == RF::fbo) ? RF::fbo2 : RF::fbo;
+        GLuint next_blur_tex = (blur_fbo == RF::fbo) ? RF::fbo_tex2 : RF::fbo_tex;
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, next_blur_fbo);
         BindQuad(RF::prog_gaussian);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, blurred_tex);
+        glBindTexture(GL_TEXTURE_2D, blur_tex);  // Previously blurred texture
+        
         loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
         SAFE_UNIFORM(loc, glUniform1i, 0);
         loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
@@ -1276,24 +1301,25 @@ void RenderFilters(int w, int h) {
         loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
         SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
         loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 4.0f);
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 2.0f);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint final_blur_tex = blur2_dst_tex;
+        GLuint fully_blurred_tex = next_blur_tex;
+        CHECK_GL_ERROR();
 
-        // DOF Composite - Use the processed texture (after all other filters) as sharp and the blurred as background
-        GLuint dof_dst_fbo = (final_blur_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint dof_dst_tex = (final_blur_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        // Step 4: Apply DOF composite using the preserved original and the fully blurred version
+        GLuint dof_output_fbo = (fully_blurred_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dof_output_tex = (fully_blurred_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
         
-        glBindFramebuffer(GL_FRAMEBUFFER, dof_dst_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, dof_output_fbo);
         BindQuad(RF::prog_dof);
         
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, original_tex);  // Texture after all other filters
+        glBindTexture(GL_TEXTURE_2D, temp_tex);  // Preserved original (processed) texture
         loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
         SAFE_UNIFORM(loc, glUniform1i, 0);
         
         glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, final_blur_tex);  // Blurred version of processed texture
+        glBindTexture(GL_TEXTURE_2D, fully_blurred_tex);  // Fully blurred version
         loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
         SAFE_UNIFORM(loc, glUniform1i, 1);
         
@@ -1309,7 +1335,7 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = dof_dst_tex;
+        final_tex = dof_output_tex;
         CHECK_GL_ERROR();
     }
 
