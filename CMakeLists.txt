@@ -28,6 +28,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(fmt)
 
+# ===================== 2. nlohmann/json库 =====================
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.2
+    GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # ===================== 2. preloader-android =====================
 FetchContent_Declare(
     preloader_android
@@ -48,7 +57,7 @@ if(NOT preloader_android_POPULATED)
     
     add_subdirectory(${preloader_android_SOURCE_DIR} ${preloader_android_BINARY_DIR})
 endif()
-target_link_libraries(preloader PUBLIC fmt::fmt)
+target_link_libraries(preloader PUBLIC fmt::fmt nlohmann_json::nlohmann_json)
 
 # ===================== 项目配置 =====================
 target_include_directories(preloader PUBLIC
