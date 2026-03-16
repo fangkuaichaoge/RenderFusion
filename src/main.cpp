@@ -58,7 +58,6 @@ namespace RF {
     GLuint prog_master = 0;     // 基础滤镜单Pass
     GLuint prog_outline = 0;    // 描边
     GLuint prog_gaussian = 0;   // 高斯模糊
-    GLuint prog_dof = 0;        // 景深
     GLuint prog_tiktok = 0;     // TikTok RGB分层
     // Art Style Shaders
         GLuint prog_cel = 0;         // 赛璐璐卡通
@@ -69,7 +68,6 @@ namespace RF {
 
     bool resources_ready = false;
     bool shaders_valid = false;
-    bool focus_pending = false;
     int current_preset = 0;
 
     // Filter Parameters (ALL OFF BY DEFAULT, NO FORCED BLACK EDGE)
@@ -96,14 +94,6 @@ namespace RF {
         bool enable_outline = false;
         float outline_thresh = 0.15f;
         float outline_opacity = 1.0f;
-
-        // Bokeh DOF
-        bool enable_dof = false;
-        ImVec2 focus_point = ImVec2(0.5f, 0.5f);
-        float focus_radius = 0.15f;
-        float blur_strength = 1.0f;
-        float transition = 0.2f;
-        float chromatic = 0.0f;
         
         // Art Styles
         int art_style = 0;      // 0=Off, 1=Cel Anime, 2=Chinese Painting, 3=Sketch, 4=Anime Flat, 5=Comic
@@ -126,9 +116,9 @@ namespace RF {
     void ApplyPreset(int idx) {
         Preset presets[] = {
             // Original: 完全无修改，无黑边，无滤镜
-            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}},
+            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f}},
             // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
-            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, false, {0.5f,0.5f}, 0.15f, 1.0f, 0.2f, 0.0f}}
+            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f}}
         };
         
         if (idx >= 0 && idx < 2) {
@@ -138,7 +128,7 @@ namespace RF {
 
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
-        return params.enable_outline || params.enable_dof;
+        return params.enable_outline;
     }
 }
 
@@ -189,13 +179,7 @@ namespace Config {
         if (j.contains("enable_outline")) RF::params.enable_outline = j["enable_outline"];
         if (j.contains("outline_thresh")) RF::params.outline_thresh = j["outline_thresh"];
         if (j.contains("outline_opacity")) RF::params.outline_opacity = j["outline_opacity"];
-        if (j.contains("enable_dof")) RF::params.enable_dof = j["enable_dof"];
-        if (j.contains("focus_point_x")) RF::params.focus_point.x = j["focus_point_x"];
-        if (j.contains("focus_point_y")) RF::params.focus_point.y = j["focus_point_y"];
-        if (j.contains("focus_radius")) RF::params.focus_radius = j["focus_radius"];
-        if (j.contains("blur_strength")) RF::params.blur_strength = j["blur_strength"];
-        if (j.contains("transition")) RF::params.transition = j["transition"];
-        if (j.contains("chromatic")) RF::params.chromatic = j["chromatic"];
+
         if (j.contains("art_style")) RF::params.art_style = j["art_style"];
         if (j.contains("art_intensity")) RF::params.art_intensity = j["art_intensity"];
         if (j.contains("enable_tiktok")) RF::params.enable_tiktok = j["enable_tiktok"];
@@ -227,13 +211,7 @@ namespace Config {
         j["enable_outline"] = RF::params.enable_outline;
         j["outline_thresh"] = RF::params.outline_thresh;
         j["outline_opacity"] = RF::params.outline_opacity;
-        j["enable_dof"] = RF::params.enable_dof;
-        j["focus_point_x"] = RF::params.focus_point.x;
-        j["focus_point_y"] = RF::params.focus_point.y;
-        j["focus_radius"] = RF::params.focus_radius;
-        j["blur_strength"] = RF::params.blur_strength;
-        j["transition"] = RF::params.transition;
-        j["chromatic"] = RF::params.chromatic;
+
         j["art_style"] = RF::params.art_style;
         j["art_intensity"] = RF::params.art_intensity;
         j["enable_tiktok"] = RF::params.enable_tiktok;
@@ -478,36 +456,7 @@ void main() {
 }
 )";
 
-// DOF Shader
-const char* g_frag_dof = R"(
-precision highp float;
-varying vec2 vTexCoord;
-uniform sampler2D uTex_Sharp;
-uniform sampler2D uTex_Blur;
-uniform vec2 uFocusPoint;
-uniform float uFocusRadius;
-uniform float uTransition;
-uniform float uBlurStrength;
-uniform float uChromatic;
 
-void main() {
-    vec4 sharp = texture2D(uTex_Sharp, vTexCoord);
-    vec4 blur = texture2D(uTex_Blur, vTexCoord);
-
-    if (uChromatic > 0.0) {
-        float dist = distance(vTexCoord, uFocusPoint);
-        float ca = dist * uChromatic * 2.0;
-        vec2 offset = (vTexCoord - uFocusPoint) * ca;
-        sharp.r = texture2D(uTex_Sharp, vTexCoord + offset).r;
-        sharp.b = texture2D(uTex_Sharp, vTexCoord - offset).b;
-    }
-
-    float dist = distance(vTexCoord, uFocusPoint);
-    float blurFactor = smoothstep(uFocusRadius, uFocusRadius + uTransition, dist);
-    blurFactor *= uBlurStrength;
-    gl_FragColor = mix(sharp, blur, clamp(blurFactor, 0.0, 1.0));
-}
-)";
 
 // TikTok RGB Split Shader - 红/蓝分层效果
 const char* g_frag_tiktok = R"(
@@ -961,10 +910,7 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_gaussian = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_gaussian));
     }
-    if (RF::prog_dof == 0) {
-        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_dof = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_dof));
-    }
+
     // TikTok RGB Split
     if (RF::prog_tiktok == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
@@ -1103,8 +1049,7 @@ void RenderFilters(int w, int h) {
     }
 
     // Pass 2: Outline (Ping-Pong rendering to avoid texture feedback loop)
-    // Skip outline when DOF is enabled to prevent conflicts
-    if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline && !RF::params.enable_dof) {
+    if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
         // 读取 final_tex，写入到另一个 FBO（乒乓渲染）
         GLuint src_tex = final_tex;
         GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
@@ -1232,112 +1177,7 @@ void RenderFilters(int w, int h) {
         CHECK_GL_ERROR();
     }
 
-    // Pass 7: DOF (Apply as final effect to preserve focus point even with other effects)
-    if (use_fbo && RF::prog_gaussian != 0 && RF::prog_dof != 0 && RF::params.enable_dof) {
-        // Apply DOF as the final effect to preserve focus point
-        GLuint original_tex = final_tex;  // This is the texture after all other filters
-        
-        // Ensure we have a separate texture to store the blurred version
-        // Use ping-pong FBOs to avoid modifying the original
-        GLuint temp_tex, blur_tex;
-        GLuint temp_fbo, blur_fbo;
-        
-        // Determine which FBOs to use based on current final_tex
-        if (original_tex == RF::fbo_tex) {
-            temp_fbo = RF::fbo2;
-            temp_tex = RF::fbo_tex2;
-            blur_fbo = RF::fbo;  // Use the other one for blur
-            blur_tex = RF::fbo_tex;
-        } else {
-            temp_fbo = RF::fbo;
-            temp_tex = RF::fbo_tex;
-            blur_fbo = RF::fbo2;  // Use the other one for blur
-            blur_tex = RF::fbo_tex2;
-        }
-        
-        // Step 1: Copy original (processed) texture to temp texture to preserve it
-        glBindFramebuffer(GL_FRAMEBUFFER, temp_fbo);
-        BindQuad(RF::prog_base);  // Use base shader for simple copy
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, original_tex);
-        
-        GLint loc = glGetUniformLocation(RF::prog_base, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        CHECK_GL_ERROR();
-        
-        // Step 2: Blur the original texture to create the background blur
-        glBindFramebuffer(GL_FRAMEBUFFER, blur_fbo);
-        BindQuad(RF::prog_gaussian);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, original_tex);  // Blur the processed texture
-        
-        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f, 0.0f);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 2.0f);  // Adjust blur strength
 
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        CHECK_GL_ERROR();
-        
-        // Step 3: Apply vertical blur pass to the already horizontally blurred image
-        GLuint next_blur_fbo = (blur_fbo == RF::fbo) ? RF::fbo2 : RF::fbo;
-        GLuint next_blur_tex = (blur_fbo == RF::fbo) ? RF::fbo_tex2 : RF::fbo_tex;
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, next_blur_fbo);
-        BindQuad(RF::prog_gaussian);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, blur_tex);  // Previously blurred texture
-        
-        loc = glGetUniformLocation(RF::prog_gaussian, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uTexelSize");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uDirection");
-        SAFE_UNIFORM(loc, glUniform2f, 0.0f, 1.0f);
-        loc = glGetUniformLocation(RF::prog_gaussian, "uRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength * 2.0f);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        GLuint fully_blurred_tex = next_blur_tex;
-        CHECK_GL_ERROR();
-
-        // Step 4: Apply DOF composite using the preserved original and the fully blurred version
-        GLuint dof_output_fbo = (fully_blurred_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint dof_output_tex = (fully_blurred_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, dof_output_fbo);
-        BindQuad(RF::prog_dof);
-        
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, temp_tex);  // Preserved original (processed) texture
-        loc = glGetUniformLocation(RF::prog_dof, "uTex_Sharp");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, fully_blurred_tex);  // Fully blurred version
-        loc = glGetUniformLocation(RF::prog_dof, "uTex_Blur");
-        SAFE_UNIFORM(loc, glUniform1i, 1);
-        
-        loc = glGetUniformLocation(RF::prog_dof, "uFocusPoint");
-        SAFE_UNIFORM(loc, glUniform2f, RF::params.focus_point.x, RF::params.focus_point.y);
-        loc = glGetUniformLocation(RF::prog_dof, "uFocusRadius");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.focus_radius);
-        loc = glGetUniformLocation(RF::prog_dof, "uTransition");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.transition);
-        loc = glGetUniformLocation(RF::prog_dof, "uBlurStrength");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.blur_strength);
-        loc = glGetUniformLocation(RF::prog_dof, "uChromatic");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.chromatic);
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = dof_output_tex;
-        CHECK_GL_ERROR();
-    }
 
     // ==========================================
     // STEP 3: DRAW FINAL RESULT TO SCREEN (NO CLEAR, NO OVERWRITE)
@@ -1531,10 +1371,7 @@ static void DrawUI() {
     ImGui::SetCursorPosY(54);
 
     // Focus point click logic
-    if (RF::focus_pending && io.MouseClicked[0] && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
-        RF::params.focus_point = ImVec2(io.MousePos.x / g_Width, io.MousePos.y / g_Height);
-        RF::focus_pending = false;
-    }
+    // Removed DOF focus point logic since DOF feature is removed
 
     // 主内容区
     ImGui::BeginChild("MainContent", ImVec2(0, -55), false, ImGuiWindowFlags_NoBackground);
@@ -1723,44 +1560,7 @@ static void DrawUI() {
             ImGui::EndTabItem();
         }
 
-        // DOF Tab
-        if (ImGui::BeginTabItem("DOF")) {
-            ImGui::Dummy(ImVec2(0, 8));
-            if (ImGui::Checkbox("Enable Depth of Field", &RF::params.enable_dof)) {
-                Config::SaveConfig(); // Save config when changed
-            }
-            
-            if (RF::params.enable_dof) {
-                ImGui::TextColored(ImVec4(0.40f, 0.80f, 0.40f, 1.0f), "DOF applied as final effect");
-                ImGui::Dummy(ImVec2(0, 6));
-                ImGui::PushStyleColor(ImGuiCol_Button, RF::focus_pending ? ImVec4(0.90f, 0.50f, 0.40f, 1.0f) : ImVec4(0.40f, 0.75f, 0.95f, 1.0f));
-                if (ImGui::Button(RF::focus_pending ? "Tap Screen!" : "Set Focus Point", ImVec2(-1, 36))) {
-                    RF::focus_pending = !RF::focus_pending;
-                    Config::SaveConfig(); // Save config when changed
-                }
-                ImGui::PopStyleColor();
-                ImGui::TextColored(ImVec4(0.55f, 0.55f, 0.60f, 1.0f), "Focus: (%.2f, %.2f)", RF::params.focus_point.x, RF::params.focus_point.y);
-                
-                ImGui::Dummy(ImVec2(0, 8));
-                ImGui::SetNextItemWidth(-20);
-                if (ImGui::SliderFloat("##FocusRadius", &RF::params.focus_radius, 0.05f, 0.5f, "Radius: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-                ImGui::SetNextItemWidth(-20);
-                if (ImGui::SliderFloat("##Transition", &RF::params.transition, 0.05f, 0.5f, "Softness: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-                ImGui::SetNextItemWidth(-20);
-                if (ImGui::SliderFloat("##BlurStr", &RF::params.blur_strength, 0.0f, 3.0f, "Blur: %.2f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-                ImGui::SetNextItemWidth(-20);
-                if (ImGui::SliderFloat("##Chromatic", &RF::params.chromatic, 0.0f, 0.1f, "Chromatic: %.3f")) {
-                    Config::SaveConfig(); // Save config when changed
-                }
-            }
-            ImGui::EndTabItem();
-        }
+
 
         ImGui::EndTabBar();
     }
