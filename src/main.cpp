@@ -544,57 +544,63 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 uniform float uIntensity;
 
-float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
-    vec3 result = color.rgb;
+    vec3 c = color.rgb;
     
-    // 降低饱和度 - 淡雅感
-    float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 0.6);
+    // ========================================
+    // 1. 颜色晕染 - 单层高效高斯模糊
+    // ========================================
+    vec3 bleed = c * 0.2;
+    bleed += texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * uTexelSize).rgb * 0.12;
+    bleed += texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * uTexelSize).rgb * 0.12;
+    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * uTexelSize).rgb * 0.12;
+    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * uTexelSize).rgb * 0.12;
+    bleed += texture2D(uTexture, vTexCoord + vec2(-4.0, 0.0) * uTexelSize).rgb * 0.06;
+    bleed += texture2D(uTexture, vTexCoord + vec2( 4.0, 0.0) * uTexelSize).rgb * 0.06;
+    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0,-4.0) * uTexelSize).rgb * 0.06;
+    bleed += texture2D(uTexture, vTexCoord + vec2( 0.0, 4.0) * uTexelSize).rgb * 0.06;
     
-    // 整体提亮 - 留白效果
-    result = result * 0.85 + 0.12;
+    c = mix(c, bleed, 0.4);
     
-    // 水墨晕染 - 柔和扩散
-    vec3 ink = result * 0.2;
-    ink += texture2D(uTexture, vTexCoord + vec2(-1.5, 0.0) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2( 1.5, 0.0) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0,-1.5) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2( 0.0, 1.5) * uTexelSize).rgb * 0.12;
-    ink += texture2D(uTexture, vTexCoord + vec2(-2.5, -2.5) * uTexelSize).rgb * 0.04;
-    ink += texture2D(uTexture, vTexCoord + vec2( 2.5, -2.5) * uTexelSize).rgb * 0.04;
-    ink += texture2D(uTexture, vTexCoord + vec2(-2.5,  2.5) * uTexelSize).rgb * 0.04;
-    ink += texture2D(uTexture, vTexCoord + vec2( 2.5,  2.5) * uTexelSize).rgb * 0.04;
+    // ========================================
+    // 2. 淡雅色调处理
+    // ========================================
+    float gray = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(vec3(gray), c, 0.65);  // 保留部分颜色
+    c = c * 0.88 + 0.08;           // 提亮留白
     
-    result = mix(result, ink, 0.35);
+    // ========================================
+    // 3. 宣纸纹理
+    // ========================================
+    float paper = random(vTexCoord * 250.0);
+    c += paper * 0.025 - 0.0125;
     
-    // 淡墨色调分离 - 6阶，层次感
-    vec3 quantized = floor(result * 5.99) / 6.0;
-    result = mix(result, quantized, 0.25);
+    // ========================================
+    // 4. 淡墨勾勒
+    // ========================================
+    float l0 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    float l1 = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float l2 = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float l3 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
+    float l4 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
     
-    // 宣纸纹理 - 淡淡的
-    float paper = random(vTexCoord * 300.0);
-    result = result + paper * 0.02 - 0.01;
+    float edge = abs(l0-l1) + abs(l0-l2) + abs(l0-l3) + abs(l0-l4);
+    float outline = smoothstep(0.02, 0.12, edge);
+    c = mix(c, c * 0.7, outline * 0.4);
     
-    // 淡墨勾勒 - 非常轻微
-    float c4 = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-    float c5 = dot(texture2D(uTexture, vTexCoord + vec2( 1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c6 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c7 = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.2) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float c0 = dot(texture2D(uTexture, vTexCoord + vec2(-1.2, 0.0) * uTexelSize).rgb, vec3(0.299, 0.587, 0.114));
-    float edge = abs(c4 - c5) + abs(c4 - c6) + abs(c4 - c7) + abs(c4 - c0);
-    float outline = smoothstep(0.015, 0.08, edge);
+    // ========================================
+    // 5. 层次感
+    // ========================================
+    vec3 quant = floor(c * 5.99) / 6.0;
+    c = mix(c, quant, 0.2);
     
-    // 淡墨勾勒 - 用浅色
-    vec3 lightInk = result * 0.85;
-    result = mix(result, lightInk, outline * 0.3);
+    c = c * 0.95 + 0.025;
+    c = clamp(c, 0.0, 1.0);
     
-    // 最终整体淡雅调
-    result = result * 0.95 + 0.025;
-    
-    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+    gl_FragColor = vec4(mix(color.rgb, c, uIntensity), color.a);
 }
 )";
 
