@@ -76,6 +76,7 @@ namespace RF {
         GLuint prog_comic = 0;       // 美漫画
         GLuint prog_oil = 0;         // 油画
         GLuint prog_vivid_outline = 0; // 鲜艳描边
+        GLuint prog_normal = 0;      // 法线效果
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -120,6 +121,14 @@ namespace RF {
         float vivid_outline_thresh = 0.15f;      // 边缘阈值
         float vivid_outline_width = 1.0f;        // 描边宽度
         float vivid_outline_opacity = 0.85f;     // 描边透明度
+        
+        // Normal Effect (法线效果)
+        bool enable_normal = false;
+        float normal_depth = 2.0f;           // 凹凸深度
+        float normal_light_x = 0.5f;         // 光源X方向
+        float normal_light_y = 0.5f;         // 光源Y方向
+        float normal_light_z = 1.0f;         // 光源高度
+        float normal_intensity = 0.7f;       // 效果强度
     };
     
     FilterParams params;
@@ -145,7 +154,7 @@ namespace RF {
 
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
-        return params.enable_outline || params.enable_vivid_outline;
+        return params.enable_outline || params.enable_vivid_outline || params.enable_normal;
     }
 }
 
@@ -209,6 +218,14 @@ namespace Config {
         if (j.contains("vivid_outline_width")) RF::params.vivid_outline_width = j["vivid_outline_width"];
         if (j.contains("vivid_outline_opacity")) RF::params.vivid_outline_opacity = j["vivid_outline_opacity"];
         
+        // Normal Effect
+        if (j.contains("enable_normal")) RF::params.enable_normal = j["enable_normal"];
+        if (j.contains("normal_depth")) RF::params.normal_depth = j["normal_depth"];
+        if (j.contains("normal_light_x")) RF::params.normal_light_x = j["normal_light_x"];
+        if (j.contains("normal_light_y")) RF::params.normal_light_y = j["normal_light_y"];
+        if (j.contains("normal_light_z")) RF::params.normal_light_z = j["normal_light_z"];
+        if (j.contains("normal_intensity")) RF::params.normal_intensity = j["normal_intensity"];
+        
         LOGI("Configuration loaded successfully");
         return true;
     }
@@ -246,6 +263,14 @@ namespace Config {
         j["vivid_outline_thresh"] = RF::params.vivid_outline_thresh;
         j["vivid_outline_width"] = RF::params.vivid_outline_width;
         j["vivid_outline_opacity"] = RF::params.vivid_outline_opacity;
+        
+        // Normal Effect
+        j["enable_normal"] = RF::params.enable_normal;
+        j["normal_depth"] = RF::params.normal_depth;
+        j["normal_light_x"] = RF::params.normal_light_x;
+        j["normal_light_y"] = RF::params.normal_light_y;
+        j["normal_light_z"] = RF::params.normal_light_z;
+        j["normal_intensity"] = RF::params.normal_intensity;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -573,6 +598,66 @@ void main() {
     vec3 outlineColor = hsv2rgb(hsv);
     
     vec3 result = mix(original.rgb, outlineColor, isEdge * uOpacity);
+    
+    gl_FragColor = vec4(result, original.a);
+}
+)";
+
+// ==========================================
+// 法线效果 Shader (Normal Effect)
+// 从图像估算法线，产生伪3D凹凸质感
+// ==========================================
+const char* g_frag_normal = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uDepth;        // 凹凸深度
+uniform float uLightX;       // 光源X方向
+uniform float uLightY;       // 光源Y方向
+uniform float uLightZ;       // 光源Z方向（高度）
+uniform float uIntensity;    // 效果强度
+
+float luminance(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+void main() {
+    vec4 original = texture2D(uTexture, vTexCoord);
+    
+    // 计算亮度梯度作为法线
+    float scale = uDepth;
+    float l = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb);
+    float r = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb);
+    float t = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb);
+    float b = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb);
+    
+    // 估算法线
+    float dx = (r - l) * scale;
+    float dy = (b - t) * scale;
+    vec3 normal = normalize(vec3(-dx, -dy, 1.0));
+    
+    // 光源方向
+    vec3 lightDir = normalize(vec3(uLightX, uLightY, uLightZ));
+    
+    // 计算漫反射光照
+    float diff = max(dot(normal, lightDir), 0.0);
+    
+    // 环境光 + 漫反射
+    float ambient = 0.3;
+    float lighting = ambient + diff * 0.7;
+    
+    // 应用光照到颜色
+    vec3 litColor = original.rgb * lighting;
+    
+    // 添加高光
+    vec3 viewDir = vec3(0.0, 0.0, 1.0);
+    vec3 halfDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
+    litColor += vec3(spec * 0.3);
+    
+    // 混合原色和效果
+    vec3 result = mix(original.rgb, litColor, uIntensity);
     
     gl_FragColor = vec4(result, original.a);
 }
@@ -1124,6 +1209,12 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_vivid_outline = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_vivid_outline));
     }
+    
+    // Normal Effect shader
+    if (RF::prog_normal == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_normal = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_normal));
+    }
 
     // Check if shaders are valid
     RF::shaders_valid = (RF::prog_base != 0);
@@ -1360,6 +1451,42 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.vivid_outline_width);
         loc = glGetUniformLocation(RF::prog_vivid_outline, "uOpacity");
         SAFE_UNIFORM(loc, glUniform1f, RF::params.vivid_outline_opacity);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dst_tex;
+        CHECK_GL_ERROR();
+    }
+
+    // Pass 5.6: Normal Effect (法线效果)
+    if (use_fbo && RF::prog_normal != 0 && RF::params.enable_normal) {
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        if (src_tex == RF::screen_tex) {
+            dst_fbo = RF::fbo;
+            dst_tex = RF::fbo_tex;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+        BindQuad(RF::prog_normal);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_normal, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_normal, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_normal, "uDepth");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_depth);
+        loc = glGetUniformLocation(RF::prog_normal, "uLightX");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_light_x);
+        loc = glGetUniformLocation(RF::prog_normal, "uLightY");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_light_y);
+        loc = glGetUniformLocation(RF::prog_normal, "uLightZ");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_light_z);
+        loc = glGetUniformLocation(RF::prog_normal, "uIntensity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_intensity);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         final_tex = dst_tex;
@@ -1767,6 +1894,38 @@ static void DrawUI() {
                 ImGui::SetNextItemWidth(-10);
                 ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Opacity");
                 if (ImGui::SliderFloat("##VividOpacity", &RF::params.vivid_outline_opacity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+            }
+            
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            // Normal Effect
+            ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Normal Effect");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Fake 3D bump effect from color regions");
+            }
+            if (ImGui::Checkbox("Enable##Normal", &RF::params.enable_normal)) Config::SaveConfig();
+            if (RF::params.enable_normal) {
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Depth");
+                if (ImGui::SliderFloat("##NormalDepth", &RF::params.normal_depth, 0.5f, 5.0f, "%.1f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Light X");
+                if (ImGui::SliderFloat("##NormalLightX", &RF::params.normal_light_x, -1.0f, 1.0f, "%.2f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Light Y");
+                if (ImGui::SliderFloat("##NormalLightY", &RF::params.normal_light_y, -1.0f, 1.0f, "%.2f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Light Height");
+                if (ImGui::SliderFloat("##NormalLightZ", &RF::params.normal_light_z, 0.1f, 2.0f, "%.2f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Intensity");
+                if (ImGui::SliderFloat("##NormalIntensity", &RF::params.normal_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
