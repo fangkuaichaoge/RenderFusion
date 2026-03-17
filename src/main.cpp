@@ -75,9 +75,6 @@ namespace RF {
         GLuint prog_anime = 0;       // 二次元平面
         GLuint prog_comic = 0;       // 美漫画
         GLuint prog_oil = 0;         // 油画
-        GLuint prog_vivid_outline = 0; // 鲜艳描边
-        GLuint prog_normal_bump = 0;   // 法线凹凸效果
-        GLuint prog_normal_map = 0;      // 法线贴图凹凸效果
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -116,17 +113,6 @@ namespace RF {
         bool enable_tiktok = false;
         float tiktok_offset = 0.005f;  // RGB偏移量
         float tiktok_intensity = 1.0f;
-        
-        // Vivid Outline (鲜艳描边)
-        bool enable_vivid_outline = false;
-        float vivid_outline_thresh = 0.15f;      // 边缘阈值
-        float vivid_outline_width = 1.0f;        // 描边宽度
-        float vivid_outline_opacity = 0.85f;     // 描边透明度
-        
-        // Normal Bump (法线凹凸效果)
-        bool enable_normal_bump = false;         // 启用法线凹凸效果
-        float normal_bump_intensity = 0.5f;      // 凹凸强度
-        float normal_bump_scale = 1.0f;          // 凹凸缩放
     };
     
     FilterParams params;
@@ -140,9 +126,9 @@ namespace RF {
     void ApplyPreset(int idx) {
         Preset presets[] = {
             // Original: 完全无修改，无黑边，无滤镜
-            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, false, 0.15f, 1.0f, 0.85f, false, 0.5f, 1.0f}},
+            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f}},
             // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
-            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, false, 0.15f, 1.0f, 0.85f, false, 0.5f, 1.0f}}
+            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f}}
         };
         
         if (idx >= 0 && idx < 2) {
@@ -152,7 +138,7 @@ namespace RF {
 
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
-        return params.enable_outline || params.enable_vivid_outline;
+        return params.enable_outline;
     }
 }
 
@@ -210,17 +196,6 @@ namespace Config {
         if (j.contains("tiktok_offset")) RF::params.tiktok_offset = j["tiktok_offset"];
         if (j.contains("tiktok_intensity")) RF::params.tiktok_intensity = j["tiktok_intensity"];
         
-        // Vivid Outline
-        if (j.contains("enable_vivid_outline")) RF::params.enable_vivid_outline = j["enable_vivid_outline"];
-        if (j.contains("vivid_outline_thresh")) RF::params.vivid_outline_thresh = j["vivid_outline_thresh"];
-        if (j.contains("vivid_outline_width")) RF::params.vivid_outline_width = j["vivid_outline_width"];
-        if (j.contains("vivid_outline_opacity")) RF::params.vivid_outline_opacity = j["vivid_outline_opacity"];
-        
-        // Normal Bump Effect
-        if (j.contains("enable_normal_bump")) RF::params.enable_normal_bump = j["enable_normal_bump"];
-        if (j.contains("normal_bump_intensity")) RF::params.normal_bump_intensity = j["normal_bump_intensity"];
-        if (j.contains("normal_bump_scale")) RF::params.normal_bump_scale = j["normal_bump_scale"];
-        
         LOGI("Configuration loaded successfully");
         return true;
     }
@@ -252,17 +227,6 @@ namespace Config {
         j["enable_tiktok"] = RF::params.enable_tiktok;
         j["tiktok_offset"] = RF::params.tiktok_offset;
         j["tiktok_intensity"] = RF::params.tiktok_intensity;
-        
-        // Vivid Outline
-        j["enable_vivid_outline"] = RF::params.enable_vivid_outline;
-        j["vivid_outline_thresh"] = RF::params.vivid_outline_thresh;
-        j["vivid_outline_width"] = RF::params.vivid_outline_width;
-        j["vivid_outline_opacity"] = RF::params.vivid_outline_opacity;
-        
-        // Normal Bump Effect
-        j["enable_normal_bump"] = RF::params.enable_normal_bump;
-        j["normal_bump_intensity"] = RF::params.normal_bump_intensity;
-        j["normal_bump_scale"] = RF::params.normal_bump_scale;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -526,72 +490,6 @@ void main() {
     vec3 result = mix(color.rgb, rgbSplit, uIntensity);
     
     gl_FragColor = vec4(result, color.a);
-}
-)";
-
-// ==========================================
-// 鲜艳描边 Shader (Vivid Outline)
-// 检测边缘，使用更鲜艳的颜色描边
-// ==========================================
-const char* g_frag_vivid_outline = R"(
-precision highp float;
-varying vec2 vTexCoord;
-uniform sampler2D uTexture;
-uniform vec2 uTexelSize;
-uniform float uThresh;
-uniform float uWidth;
-uniform float uOpacity;
-
-// HSV 转换函数
-vec3 rgb2hsv(vec3 c) {
-    vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
-    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-    float d = q.x - min(q.w, q.y);
-    float e = 1.0e-10;
-    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-}
-
-vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
-
-float luminance(vec3 c) {
-    return dot(c, vec3(0.299, 0.587, 0.114));
-}
-
-void main() {
-    vec4 original = texture2D(uTexture, vTexCoord);
-    vec2 texel = uTexelSize * uWidth;
-    
-    // Sobel 边缘检测
-    float tl = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * texel).rgb);
-    float t  = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * texel).rgb);
-    float tr = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * texel).rgb);
-    float l  = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * texel).rgb);
-    float r  = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * texel).rgb);
-    float bl = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * texel).rgb);
-    float b  = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * texel).rgb);
-    float br = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * texel).rgb);
-    
-    // Sobel算子
-    float gx = -tl - 2.0*l - bl + tr + 2.0*r + br;
-    float gy = -tl - 2.0*t - tr + bl + 2.0*b + br;
-    float edge = sqrt(gx*gx + gy*gy);
-    
-    // 平滑边缘
-    float isEdge = smoothstep(uThresh * 0.5, uThresh * 1.5, edge);
-    
-    // 计算描边颜色：略微深的颜色
-    vec3 hsv = rgb2hsv(original.rgb);
-    hsv.z = clamp(hsv.z * 0.85, 0.0, 1.0);  // 略微深一点
-    vec3 outlineColor = hsv2rgb(hsv);
-    
-    vec3 result = mix(original.rgb, outlineColor, isEdge * uOpacity);
-    
-    gl_FragColor = vec4(result, original.a);
 }
 )";
 
@@ -937,55 +835,6 @@ void main() {
     
     gl_FragColor = vec4(mix(color.rgb, pencil, uIntensity), color.a);
 }
-// 法线凹凸效果着色器 (Normal Bump Effect) - 真正的凹凸效果
-const char* g_frag_normal_bump = R"(
-precision highp float;
-varying vec2 vTexCoord;
-uniform sampler2D uTexture;
-uniform vec2 uTexelSize;
-uniform float uBumpIntensity;    // 凹凸强度
-uniform float uBumpScale;        // 凹凸缩放
-uniform vec2 uLightDir;          // 光照方向
-
-// 计算亮度
-float luminance(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
-
-void main() {
-    vec4 color = texture2D(uTexture, vTexCoord);
-    vec3 result = color.rgb;
-    
-    // 计算周围像素的深度差来模拟法线
-    float center = luminance(texture2D(uTexture, vTexCoord).rgb);
-    float left = luminance(texture2D(uTexture, vTexCoord + vec2(-uTexelSize.x, 0.0)).rgb);
-    float right = luminance(texture2D(uTexture, vTexCoord + vec2(uTexelSize.x, 0.0)).rgb);
-    float top = luminance(texture2D(uTexture, vTexCoord + vec2(0.0, -uTexelSize.y)).rgb);
-    float bottom = luminance(texture2D(uTexture, vTexCoord + vec2(0.0, uTexelSize.y)).rgb);
-    
-    // 计算法线向量 - 使用相邻像素的亮度差
-    vec2 normal = vec2(left - right, top - bottom);
-    
-    // 根据凹凸强度调整法线
-    normal *= uBumpIntensity;
-    
-    // 计算偏移量，模拟表面凹凸
-    vec2 offsetTexCoord = vTexCoord + normal * uBumpScale;
-    vec3 bumpSample = texture2D(uTexture, offsetTexCoord).rgb;
-    
-    // 使用光照方向计算简单的光照效果
-    vec2 lightDir = normalize(uLightDir);
-    float lighting = dot(normalize(vec3(normal, 1.0)), vec3(lightDir, 0.5));
-    
-    // 混合原始颜色和凹凸效果
-    result = mix(bumpSample, result, 0.7);
-    
-    // 添加光照效果
-    result += lighting * 0.2 * uBumpIntensity;
-    
-    // 确保颜色值在合理范围内
-    result = clamp(result, 0.0, 1.0);
-    
-    gl_FragColor = vec4(result, color.a);
-}
 )";
 
 static float g_Time = 0.0f;
@@ -1183,18 +1032,6 @@ void InitFilterResources(int w, int h) {
     if (RF::prog_oil == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_oil = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_oil));
-    }
-    
-    // Vivid Outline shader
-    if (RF::prog_vivid_outline == 0) {
-        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_vivid_outline = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_vivid_outline));
-    }
-    
-    // Normal Bump shader
-    if (RF::prog_normal_bump == 0) {
-        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_normal_bump = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_normal_bump));
     }
 
     // Check if shaders are valid
@@ -1406,71 +1243,7 @@ void RenderFilters(int w, int h) {
         }
     }
 
-    // Pass 5.5: Vivid Outline (鲜艳描边)
-    if (use_fbo && RF::prog_vivid_outline != 0 && RF::params.enable_vivid_outline) {
-        GLuint src_tex = final_tex;
-        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        if (src_tex == RF::screen_tex) {
-            dst_fbo = RF::fbo;
-            dst_tex = RF::fbo_tex;
-        }
-
-        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
-        BindQuad(RF::prog_vivid_outline);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, src_tex);
-        
-        GLint loc;
-        loc = glGetUniformLocation(RF::prog_vivid_outline, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        loc = glGetUniformLocation(RF::prog_vivid_outline, "uTexelSize");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-        loc = glGetUniformLocation(RF::prog_vivid_outline, "uThresh");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.vivid_outline_thresh);
-        loc = glGetUniformLocation(RF::prog_vivid_outline, "uWidth");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.vivid_outline_width);
-        loc = glGetUniformLocation(RF::prog_vivid_outline, "uOpacity");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.vivid_outline_opacity);
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = dst_tex;
-        CHECK_GL_ERROR();
-    }
-    
-    // Pass 6: Normal Bump (法线凹凸效果)
-    if (use_fbo && RF::prog_normal_bump != 0 && RF::params.enable_normal_bump) {
-        GLuint src_tex = final_tex;
-        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        if (src_tex == RF::screen_tex) {
-            dst_fbo = RF::fbo;
-            dst_tex = RF::fbo_tex;
-        }
-
-        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
-        BindQuad(RF::prog_normal_bump);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, src_tex);
-        
-        GLint loc;
-        loc = glGetUniformLocation(RF::prog_normal_bump, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        loc = glGetUniformLocation(RF::prog_normal_bump, "uTexelSize");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-        loc = glGetUniformLocation(RF::prog_normal_bump, "uBumpIntensity");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_bump_intensity);
-        loc = glGetUniformLocation(RF::prog_normal_bump, "uBumpScale");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.normal_bump_scale);
-        loc = glGetUniformLocation(RF::prog_normal_bump, "uLightDir");
-        SAFE_UNIFORM(loc, glUniform2f, 0.5f, 0.5f); // 默认光照方向
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = dst_tex;
-        CHECK_GL_ERROR();
-    }
-
-    // Pass 7: Outline (Moved before DOF to allow proper叠加)
+    // Pass 6: Outline (Moved before DOF to allow proper叠加)
     if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
         // 读取 final_tex，写入到另一个 FBO（乒乓渲染）
         GLuint src_tex = final_tex;
@@ -1849,30 +1622,6 @@ static void DrawUI() {
                 if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) Config::SaveConfig();
             }
             
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            // Vivid Outline
-            ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Vivid Outline");
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Vivid color edge outline");
-            }
-            if (ImGui::Checkbox("Enable##VividOutline", &RF::params.enable_vivid_outline)) Config::SaveConfig();
-            if (RF::params.enable_vivid_outline) {
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Threshold");
-                if (ImGui::SliderFloat("##VividThresh", &RF::params.vivid_outline_thresh, 0.05f, 0.5f, "%.2f")) Config::SaveConfig();
-                
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Width");
-                if (ImGui::SliderFloat("##VividWidth", &RF::params.vivid_outline_width, 0.5f, 3.0f, "%.1f")) Config::SaveConfig();
-                
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Opacity");
-                if (ImGui::SliderFloat("##VividOpacity", &RF::params.vivid_outline_opacity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-            }
-            
             ImGui::EndTabItem();
         }
 
@@ -1896,26 +1645,6 @@ static void DrawUI() {
                 if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
                 ImGui::SetNextItemWidth(-10);
                 if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
-            }
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            // Normal Bump (法线凹凸效果)
-            ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Normal Bump Effect");
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Add 3D bump/relief effect to the image");
-            }
-            if (ImGui::Checkbox("Enable##NormalBump", &RF::params.enable_normal_bump)) Config::SaveConfig();
-            if (RF::params.enable_normal_bump) {
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Bump Intensity");
-                if (ImGui::SliderFloat("##BumpIntensity", &RF::params.normal_bump_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-                
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Bump Scale");
-                if (ImGui::SliderFloat("##BumpScale", &RF::params.normal_bump_scale, 0.1f, 2.0f, "%.2f")) Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
