@@ -75,10 +75,7 @@ namespace RF {
         GLuint prog_anime = 0;       // 二次元平面
         GLuint prog_comic = 0;       // 美漫画
         GLuint prog_oil = 0;         // 油画
-        
-    // 3D Model Outline Shaders
-    GLuint prog_model_outline = 0;       // 3D模型描边（高质量）
-    GLuint prog_model_outline_fast = 0;  // 3D模型描边（高性能）
+        GLuint prog_model_outline = 0; // 模型边缘描边
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -118,15 +115,13 @@ namespace RF {
         float tiktok_offset = 0.005f;  // RGB偏移量
         float tiktok_intensity = 1.0f;
         
-        // 3D Model Outline - 模型描边参数
-        bool enable_model_outline = false;      // 启用3D模型描边
-        int model_outline_mode = 0;              // 0=高质量, 1=高性能
-        float model_outline_width = 1.5f;        // 描边宽度
-        float model_depth_threshold = 0.1f;      // 深度阈值
-        float model_normal_threshold = 0.5f;     // 法线角度阈值
-        float model_color_threshold = 0.15f;     // 颜色变化阈值
-        float model_outline_opacity = 1.0f;      // 描边不透明度
-        bool model_use_black_outline = true;     // 使用纯黑描边
+        // Model Edge Outline (模型几何边缘描边)
+        bool enable_model_outline = false;
+        float model_outline_depth_thresh = 0.15f;   // 深度差异阈值
+        float model_outline_normal_thresh = 0.08f;   // 法线差异阈值
+        float model_outline_width = 1.0f;            // 描边宽度
+        float model_outline_opacity = 0.85f;         // 描边透明度
+        bool model_outline_use_black = true;         // 使用纯黑描边
     };
     
     FilterParams params;
@@ -152,7 +147,7 @@ namespace RF {
 
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
-        return params.enable_outline;
+        return params.enable_outline || params.enable_model_outline;
     }
 }
 
@@ -210,15 +205,13 @@ namespace Config {
         if (j.contains("tiktok_offset")) RF::params.tiktok_offset = j["tiktok_offset"];
         if (j.contains("tiktok_intensity")) RF::params.tiktok_intensity = j["tiktok_intensity"];
         
-        // 3D Model Outline parameters
+        // Model Edge Outline
         if (j.contains("enable_model_outline")) RF::params.enable_model_outline = j["enable_model_outline"];
-        if (j.contains("model_outline_mode")) RF::params.model_outline_mode = j["model_outline_mode"];
+        if (j.contains("model_outline_depth_thresh")) RF::params.model_outline_depth_thresh = j["model_outline_depth_thresh"];
+        if (j.contains("model_outline_normal_thresh")) RF::params.model_outline_normal_thresh = j["model_outline_normal_thresh"];
         if (j.contains("model_outline_width")) RF::params.model_outline_width = j["model_outline_width"];
-        if (j.contains("model_depth_threshold")) RF::params.model_depth_threshold = j["model_depth_threshold"];
-        if (j.contains("model_normal_threshold")) RF::params.model_normal_threshold = j["model_normal_threshold"];
-        if (j.contains("model_color_threshold")) RF::params.model_color_threshold = j["model_color_threshold"];
         if (j.contains("model_outline_opacity")) RF::params.model_outline_opacity = j["model_outline_opacity"];
-        if (j.contains("model_use_black_outline")) RF::params.model_use_black_outline = j["model_use_black_outline"];
+        if (j.contains("model_outline_use_black")) RF::params.model_outline_use_black = j["model_outline_use_black"];
         
         LOGI("Configuration loaded successfully");
         return true;
@@ -252,15 +245,13 @@ namespace Config {
         j["tiktok_offset"] = RF::params.tiktok_offset;
         j["tiktok_intensity"] = RF::params.tiktok_intensity;
         
-        // 3D Model Outline parameters
+        // Model Edge Outline
         j["enable_model_outline"] = RF::params.enable_model_outline;
-        j["model_outline_mode"] = RF::params.model_outline_mode;
+        j["model_outline_depth_thresh"] = RF::params.model_outline_depth_thresh;
+        j["model_outline_normal_thresh"] = RF::params.model_outline_normal_thresh;
         j["model_outline_width"] = RF::params.model_outline_width;
-        j["model_depth_threshold"] = RF::params.model_depth_threshold;
-        j["model_normal_threshold"] = RF::params.model_normal_threshold;
-        j["model_color_threshold"] = RF::params.model_color_threshold;
         j["model_outline_opacity"] = RF::params.model_outline_opacity;
-        j["model_use_black_outline"] = RF::params.model_use_black_outline;
+        j["model_outline_use_black"] = RF::params.model_outline_use_black;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -528,233 +519,144 @@ void main() {
 )";
 
 // ==========================================
-// 3D Model Outline Shader - 深度/法线边缘检测
-// 特点：检测模型真实边缘，跳过平滑衔接区域
+// 模型边缘描边 Shader (Model Edge Outline)
+// 基于深度估计和法线重建的边缘检测
+// 检测几何边缘（面与面的交界），过滤平面内的纹理边缘
 // ==========================================
 const char* g_frag_model_outline = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
-uniform float uOutlineWidth;      // 描边宽度
-uniform float uDepthThreshold;    // 深度阈值
-uniform float uNormalThreshold;   // 法线角度阈值（弧度）
-uniform float uColorThreshold;    // 颜色变化阈值
-uniform float uOpacity;           // 描边不透明度
-uniform vec3 uOutlineColor;       // 描边颜色
-uniform int uUseBlackOutline;     // 是否使用纯黑描边
+uniform float uDepthThresh;      // 深度差异阈值
+uniform float uNormalThresh;     // 法线差异阈值
+uniform float uOutlineWidth;     // 描边宽度
+uniform float uOpacity;          // 描边透明度
+uniform int uUseBlackOutline;    // 是否使用纯黑描边
 
-// 从颜色重建近似法线（基于颜色梯度）
-vec3 estimateNormal(vec2 uv, float strength) {
-    vec3 c = texture2D(uTexture, uv).rgb;
-    vec3 cL = texture2D(uTexture, uv + vec2(-1.0, 0.0) * uTexelSize * strength).rgb;
-    vec3 cR = texture2D(uTexture, uv + vec2( 1.0, 0.0) * uTexelSize * strength).rgb;
-    vec3 cT = texture2D(uTexture, uv + vec2( 0.0,-1.0) * uTexelSize * strength).rgb;
-    vec3 cB = texture2D(uTexture, uv + vec2( 0.0, 1.0) * uTexelSize * strength).rgb;
-    
-    // 计算梯度作为近似法线
-    vec3 gradX = (cR - cL) * 0.5;
-    vec3 gradY = (cB - cT) * 0.5;
-    
-    // 归一化
-    vec3 normal = normalize(vec3(gradX.r + gradX.g + gradX.b, gradY.r + gradY.g + gradY.b, 0.1));
-    return normal;
+// 计算亮度作为深度近似
+float luminance(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
 }
 
-// 计算局部深度差异（模拟）
-float estimateDepth(vec2 uv, float strength) {
-    float lum = dot(texture2D(uTexture, uv).rgb, vec3(0.299, 0.587, 0.114));
-    float lumL = dot(texture2D(uTexture, uv + vec2(-1.0, 0.0) * uTexelSize * strength).rgb, vec3(0.299, 0.587, 0.114));
-    float lumR = dot(texture2D(uTexture, uv + vec2( 1.0, 0.0) * uTexelSize * strength).rgb, vec3(0.299, 0.587, 0.114));
-    float lumT = dot(texture2D(uTexture, uv + vec2( 0.0,-1.0) * uTexelSize * strength).rgb, vec3(0.299, 0.587, 0.114));
-    float lumB = dot(texture2D(uTexture, uv + vec2( 0.0, 1.0) * uTexelSize * strength).rgb, vec3(0.299, 0.587, 0.114));
+// 从亮度梯度估算法线方向
+vec3 estimateNormal(vec2 uv, vec2 texelSize) {
+    // 采样周围像素的亮度
+    float c  = luminance(texture2D(uTexture, uv).rgb);
+    float l  = luminance(texture2D(uTexture, uv + vec2(-1.0, 0.0) * texelSize).rgb);
+    float r  = luminance(texture2D(uTexture, uv + vec2( 1.0, 0.0) * texelSize).rgb);
+    float t  = luminance(texture2D(uTexture, uv + vec2( 0.0,-1.0) * texelSize).rgb);
+    float b  = luminance(texture2D(uTexture, uv + vec2( 0.0, 1.0) * texelSize).rgb);
     
-    // 使用亮度差异模拟深度边缘
-    float depthDiff = max(abs(lum - lumL), abs(lum - lumR));
-    depthDiff = max(depthDiff, abs(lum - lumT));
-    depthDiff = max(depthDiff, abs(lum - lumB));
+    // 计算梯度作为法线
+    float dx = (r - l) * 0.5;
+    float dy = (b - t) * 0.5;
     
-    return depthDiff;
+    // 返回归一化的法线向量
+    vec3 n = normalize(vec3(-dx, -dy, 1.0));
+    return n;
 }
 
-// 检测平滑衔接区域（法线连续性）
-float detectSmoothRegion(vec2 uv, float strength) {
-    vec3 n0 = estimateNormal(uv, strength);
-    vec3 n1 = estimateNormal(uv + vec2( 1.0, 0.0) * uTexelSize * strength, strength);
-    vec3 n2 = estimateNormal(uv + vec2(-1.0, 0.0) * uTexelSize * strength, strength);
-    vec3 n3 = estimateNormal(uv + vec2( 0.0, 1.0) * uTexelSize * strength, strength);
-    vec3 n4 = estimateNormal(uv + vec2( 0.0,-1.0) * uTexelSize * strength, strength);
+// 检测平面一致性（判断是否属于同一平面）
+float checkPlaneConsistency(vec2 uv, vec2 texelSize, vec3 centerNormal) {
+    vec3 n1 = estimateNormal(uv + vec2(-1.0, 0.0) * texelSize, texelSize);
+    vec3 n2 = estimateNormal(uv + vec2( 1.0, 0.0) * texelSize, texelSize);
+    vec3 n3 = estimateNormal(uv + vec2( 0.0,-1.0) * texelSize, texelSize);
+    vec3 n4 = estimateNormal(uv + vec2( 0.0, 1.0) * texelSize, texelSize);
     
-    // 计算法线点积（1.0 = 平行，0.0 = 垂直）
-    float dot1 = abs(dot(n0, n1));
-    float dot2 = abs(dot(n0, n2));
-    float dot3 = abs(dot(n0, n3));
-    float dot4 = abs(dot(n0, n4));
+    // 计算法线差异
+    float d1 = 1.0 - dot(centerNormal, n1);
+    float d2 = 1.0 - dot(centerNormal, n2);
+    float d3 = 1.0 - dot(centerNormal, n3);
+    float d4 = 1.0 - dot(centerNormal, n4);
     
-    // 平均法线一致性
-    float avgConsistency = (dot1 + dot2 + dot3 + dot4) * 0.25;
+    // 平均法线差异
+    return (d1 + d2 + d3 + d4) * 0.25;
+}
+
+// Sobel深度边缘检测
+float depthEdgeDetection(vec2 uv, vec2 texelSize) {
+    float c  = luminance(texture2D(uTexture, uv).rgb);
+    float tl = luminance(texture2D(uTexture, uv + vec2(-1.0,-1.0) * texelSize).rgb);
+    float t  = luminance(texture2D(uTexture, uv + vec2( 0.0,-1.0) * texelSize).rgb);
+    float tr = luminance(texture2D(uTexture, uv + vec2( 1.0,-1.0) * texelSize).rgb);
+    float l  = luminance(texture2D(uTexture, uv + vec2(-1.0, 0.0) * texelSize).rgb);
+    float r  = luminance(texture2D(uTexture, uv + vec2( 1.0, 0.0) * texelSize).rgb);
+    float bl = luminance(texture2D(uTexture, uv + vec2(-1.0, 1.0) * texelSize).rgb);
+    float b  = luminance(texture2D(uTexture, uv + vec2( 0.0, 1.0) * texelSize).rgb);
+    float br = luminance(texture2D(uTexture, uv + vec2( 1.0, 1.0) * texelSize).rgb);
     
-    // 高一致性 = 平滑衔接区域
-    return avgConsistency;
+    // Sobel算子
+    float gx = -tl - 2.0*l - bl + tr + 2.0*r + br;
+    float gy = -tl - 2.0*t - tr + bl + 2.0*b + br;
+    
+    return sqrt(gx*gx + gy*gy);
+}
+
+// 法线边缘检测 - 检测面与面的交界
+float normalEdgeDetection(vec2 uv, vec2 texelSize) {
+    vec3 centerNormal = estimateNormal(uv, texelSize);
+    
+    // 采样周围法线
+    vec3 nL = estimateNormal(uv + vec2(-1.0, 0.0) * texelSize, texelSize);
+    vec3 nR = estimateNormal(uv + vec2( 1.0, 0.0) * texelSize, texelSize);
+    vec3 nT = estimateNormal(uv + vec2( 0.0,-1.0) * texelSize, texelSize);
+    vec3 nB = estimateNormal(uv + vec2( 0.0, 1.0) * texelSize, texelSize);
+    
+    // 计算法线角度差
+    float diffL = 1.0 - dot(centerNormal, nL);
+    float diffR = 1.0 - dot(centerNormal, nR);
+    float diffT = 1.0 - dot(centerNormal, nT);
+    float diffB = 1.0 - dot(centerNormal, nB);
+    
+    // 取最大差异作为边缘强度
+    return max(max(diffL, diffR), max(diffT, diffB));
 }
 
 void main() {
     vec4 original = texture2D(uTexture, vTexCoord);
+    vec2 texel = uTexelSize * uOutlineWidth;
     
-    // ==========================================
-    // 1. 多尺度边缘检测
-    // ==========================================
-    float edge = 0.0;
-    float samples[3];
-    samples[0] = 1.0;  // 近距离
-    samples[1] = 2.0;  // 中距离
-    samples[2] = 3.0;  // 远距离
+    // 1. 深度边缘检测（检测物体边界）
+    float depthEdge = depthEdgeDetection(vTexCoord, texel);
     
-    for (int s = 0; s < 3; s++) {
-        float scale = samples[s] * uOutlineWidth;
-        vec2 offset = uTexelSize * scale;
-        
-        // Sobel边缘检测
-        float gx = 0.0, gy = 0.0;
-        
-        // 使用亮度进行边缘检测
-        float tl = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float t  = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float tr = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float l  = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float r  = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float bl = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float b  = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        float br = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-        
-        gx = -tl + tr - 2.0*l + 2.0*r - bl + br;
-        gy = -tl - 2.0*t - tr + bl + 2.0*b + br;
-        
-        float localEdge = sqrt(gx*gx + gy*gy);
-        edge = max(edge, localEdge);
-    }
+    // 2. 法线边缘检测（检测面与面的交界）
+    float normalEdge = normalEdgeDetection(vTexCoord, texel);
     
-    // ==========================================
-    // 2. 深度边缘检测
-    // ==========================================
-    float depthEdge = 0.0;
-    for (int s = 0; s < 3; s++) {
-        float scale = samples[s] * uOutlineWidth;
-        float localDepth = estimateDepth(vTexCoord, scale);
-        depthEdge = max(depthEdge, localDepth);
-    }
+    // 3. 平面一致性检测
+    vec3 centerNormal = estimateNormal(vTexCoord, texel);
+    float planarity = checkPlaneConsistency(vTexCoord, texel, centerNormal);
     
-    // ==========================================
-    // 3. 平滑衔接区域检测
-    // ==========================================
-    float smoothness = detectSmoothRegion(vTexCoord, uOutlineWidth);
+    // 4. 综合边缘判断
+    // 深度边缘：物体外边界
+    // 法线边缘：面与面的交界
+    // 平面一致性：过滤同一平面内的纹理边缘
     
-    // 平滑区域（高一致性）应该减少描边
-    float smoothFactor = smoothstep(0.85, 0.98, smoothness);
+    // 归一化边缘值
+    float depthOutline = smoothstep(uDepthThresh * 0.5, uDepthThresh * 1.5, depthEdge);
+    float normalOutline = smoothstep(uNormalThresh * 0.3, uNormalThresh * 1.2, normalEdge);
     
-    // ==========================================
-    // 4. 颜色变化检测（用于区分物体边界）
-    // ==========================================
-    vec3 c0 = original.rgb;
-    vec3 cR = texture2D(uTexture, vTexCoord + vec2(1.0, 0.0) * uTexelSize * uOutlineWidth).rgb;
-    vec3 cB = texture2D(uTexture, vTexCoord + vec2(0.0, 1.0) * uTexelSize * uOutlineWidth).rgb;
+    // 平面内纹理边缘抑制
+    // 如果平面一致性好（差异小），说明可能是纹理边缘，应该抑制
+    float planarSuppress = 1.0 - smoothstep(0.0, 0.02, planarity);
     
-    float colorDiffR = distance(c0, cR);
-    float colorDiffB = distance(c0, cB);
-    float colorDiff = max(colorDiffR, colorDiffB);
+    // 最终边缘：深度边缘 + 法线边缘（法线边缘不受平面抑制影响）
+    // 深度边缘受平面抑制影响（减少纹理内的假边缘）
+    float finalEdge = max(depthOutline * (1.0 - planarSuppress * 0.5), normalOutline);
     
-    // ==========================================
-    // 5. 综合边缘判断
-    // ==========================================
-    // 归一化边缘强度
-    float normalizedEdge = edge / 4.0;
-    
-    // 结合深度和颜色变化
-    float combinedEdge = max(normalizedEdge, depthEdge * 2.0);
-    
-    // 应用深度阈值
-    float depthMask = smoothstep(uDepthThreshold * 0.5, uDepthThreshold * 2.0, depthEdge);
-    
-    // 应用颜色阈值
-    float colorMask = smoothstep(uColorThreshold * 0.3, uColorThreshold, colorDiff);
-    
-    // 最终边缘：结合所有因素
-    float finalEdge = combinedEdge;
-    finalEdge *= (1.0 - smoothFactor * 0.9);  // 平滑区域大幅减少描边
-    finalEdge = max(finalEdge, depthMask * 0.5);  // 深度边缘始终可见
-    finalEdge = max(finalEdge, colorMask * 0.3);  // 颜色边界
-    
-    // 平滑过渡
-    float isEdge = smoothstep(0.05, 0.25, finalEdge);
-    
-    // ==========================================
-    // 6. 应用描边
-    // ==========================================
+    // 5. 绘制描边
     vec3 outlineColor;
     if (uUseBlackOutline == 1) {
         // 纯黑描边
-        outlineColor = vec3(0.0, 0.0, 0.0);
+        outlineColor = vec3(0.0);
     } else {
-        // 使用深色原色
+        // 使用原色的深色版本
         outlineColor = original.rgb * 0.15;
     }
     
-    vec3 finalColor = mix(original.rgb, outlineColor, isEdge * uOpacity);
+    vec3 result = mix(original.rgb, outlineColor, finalEdge * uOpacity);
     
-    gl_FragColor = vec4(finalColor, original.a);
-}
-)";
-
-// Sobel描边Shader - 高性能版
-const char* g_frag_model_outline_fast = R"(
-precision highp float;
-varying vec2 vTexCoord;
-uniform sampler2D uTexture;
-uniform vec2 uTexelSize;
-uniform float uOutlineWidth;
-uniform float uDepthThreshold;
-uniform float uNormalThreshold;
-uniform float uOpacity;
-uniform int uUseBlackOutline;
-
-void main() {
-    vec4 original = texture2D(uTexture, vTexCoord);
-    
-    float scale = uOutlineWidth;
-    vec2 offset = uTexelSize * scale;
-    
-    // 简化的Sobel边缘检测
-    float tl = dot(texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float t  = dot(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float tr = dot(texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float l  = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float r  = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float bl = dot(texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float b  = dot(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    float br = dot(texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * offset).rgb, vec3(0.299, 0.587, 0.114));
-    
-    float gx = -tl + tr - 2.0*l + 2.0*r - bl + br;
-    float gy = -tl - 2.0*t - tr + bl + 2.0*b + br;
-    
-    float edge = sqrt(gx*gx + gy*gy) / 4.0;
-    
-    // 检测平滑衔接区域 - 使用局部颜色一致性
-    float center = dot(original.rgb, vec3(0.299, 0.587, 0.114));
-    float variance = abs(center - tl) + abs(center - tr) + abs(center - bl) + abs(center - br);
-    variance /= 4.0;
-    
-    // 低方差 = 平滑区域 = 减少描边
-    float smoothFactor = 1.0 - smoothstep(0.0, 0.1, variance);
-    
-    // 应用阈值和平滑因子
-    float isEdge = smoothstep(uDepthThreshold * 0.5, uDepthThreshold * 1.5, edge);
-    isEdge *= (1.0 - smoothFactor * 0.95);  // 平滑衔接区域几乎不描边
-    
-    // 描边颜色
-    vec3 outlineColor = (uUseBlackOutline == 1) ? vec3(0.0) : original.rgb * 0.15;
-    vec3 finalColor = mix(original.rgb, outlineColor, isEdge * uOpacity);
-    
-    gl_FragColor = vec4(finalColor, original.a);
+    gl_FragColor = vec4(result, original.a);
 }
 )";
 
@@ -1299,14 +1201,10 @@ void InitFilterResources(int w, int h) {
         RF::prog_oil = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_oil));
     }
     
-    // 3D Model Outline shaders
+    // Model Edge Outline shader
     if (RF::prog_model_outline == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_model_outline = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_model_outline));
-    }
-    if (RF::prog_model_outline_fast == 0) {
-        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_model_outline_fast = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_model_outline_fast));
     }
 
     // Check if shaders are valid
@@ -1518,48 +1416,40 @@ void RenderFilters(int w, int h) {
         }
     }
 
-    // Pass 7: 3D Model Outline - 模型描边
-    if (use_fbo && RF::params.enable_model_outline) {
+    // Pass 5.5: Model Edge Outline (模型几何边缘描边)
+    if (use_fbo && RF::prog_model_outline != 0 && RF::params.enable_model_outline) {
         GLuint src_tex = final_tex;
         GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
         GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        if (src_tex == RF::screen_tex) { dst_fbo = RF::fbo; dst_tex = RF::fbo_tex; }
-        
-        // 选择shader
-        GLuint outline_prog = (RF::params.model_outline_mode == 1) ? RF::prog_model_outline_fast : RF::prog_model_outline;
-        
-        if (outline_prog != 0) {
-            glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
-            BindQuad(outline_prog);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, src_tex);
-            
-            GLint loc;
-            loc = glGetUniformLocation(outline_prog, "uTexture");
-            SAFE_UNIFORM(loc, glUniform1i, 0);
-            loc = glGetUniformLocation(outline_prog, "uTexelSize");
-            SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-            loc = glGetUniformLocation(outline_prog, "uOutlineWidth");
-            SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_width);
-            loc = glGetUniformLocation(outline_prog, "uDepthThreshold");
-            SAFE_UNIFORM(loc, glUniform1f, RF::params.model_depth_threshold);
-            loc = glGetUniformLocation(outline_prog, "uNormalThreshold");
-            SAFE_UNIFORM(loc, glUniform1f, RF::params.model_normal_threshold);
-            loc = glGetUniformLocation(outline_prog, "uOpacity");
-            SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_opacity);
-            loc = glGetUniformLocation(outline_prog, "uUseBlackOutline");
-            SAFE_UNIFORM(loc, glUniform1i, RF::params.model_use_black_outline ? 1 : 0);
-            
-            // 高质量模式的额外参数
-            if (RF::params.model_outline_mode == 0) {
-                loc = glGetUniformLocation(outline_prog, "uColorThreshold");
-                SAFE_UNIFORM(loc, glUniform1f, RF::params.model_color_threshold);
-            }
-
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-            final_tex = dst_tex;
-            CHECK_GL_ERROR();
+        if (src_tex == RF::screen_tex) {
+            dst_fbo = RF::fbo;
+            dst_tex = RF::fbo_tex;
         }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+        BindQuad(RF::prog_model_outline);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+        
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_model_outline, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_model_outline, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_model_outline, "uDepthThresh");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_depth_thresh);
+        loc = glGetUniformLocation(RF::prog_model_outline, "uNormalThresh");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_normal_thresh);
+        loc = glGetUniformLocation(RF::prog_model_outline, "uOutlineWidth");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_width);
+        loc = glGetUniformLocation(RF::prog_model_outline, "uOpacity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_opacity);
+        loc = glGetUniformLocation(RF::prog_model_outline, "uUseBlackOutline");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.model_outline_use_black ? 1 : 0);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dst_tex;
+        CHECK_GL_ERROR();
     }
 
     // Pass 6: Outline (Moved before DOF to allow proper叠加)
@@ -1941,61 +1831,41 @@ static void DrawUI() {
                 if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) Config::SaveConfig();
             }
             
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            // Model Edge Outline
+            ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Model Edge Outline");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Detects geometric edges (face boundaries)\nFilters texture edges on flat surfaces");
+            }
+            if (ImGui::Checkbox("Enable##ModelOutline", &RF::params.enable_model_outline)) Config::SaveConfig();
+            if (RF::params.enable_model_outline) {
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Depth Threshold");
+                if (ImGui::SliderFloat("##ModelDepthThresh", &RF::params.model_outline_depth_thresh, 0.05f, 0.4f, "%.2f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Normal Threshold");
+                if (ImGui::SliderFloat("##ModelNormalThresh", &RF::params.model_outline_normal_thresh, 0.02f, 0.2f, "%.2f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Outline Width");
+                if (ImGui::SliderFloat("##ModelOutlineWidth", &RF::params.model_outline_width, 0.5f, 3.0f, "%.1f")) Config::SaveConfig();
+                
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Opacity");
+                if (ImGui::SliderFloat("##ModelOutlineOpacity", &RF::params.model_outline_opacity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+                
+                if (ImGui::Checkbox("Pure Black Outline##Model", &RF::params.model_outline_use_black)) Config::SaveConfig();
+            }
+            
             ImGui::EndTabItem();
         }
 
         // Effects Tab
         if (ImGui::BeginTabItem("Effects")) {
-            ImGui::Spacing();
-            
-            // 3D Model Outline
-            ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "3D Model Outline");
-            if (ImGui::Checkbox("Enable Model Outline", &RF::params.enable_model_outline)) Config::SaveConfig();
-            
-            if (RF::params.enable_model_outline) {
-                ImGui::Spacing();
-                
-                // Mode selection
-                const char* outline_modes[] = {"High Quality", "High Performance"};
-                ImGui::SetNextItemWidth(-10);
-                if (ImGui::Combo("##OutlineMode", &RF::params.model_outline_mode, outline_modes, 2)) Config::SaveConfig();
-                
-                ImGui::Spacing();
-                
-                // Black outline toggle
-                if (ImGui::Checkbox("Pure Black Outline", &RF::params.model_use_black_outline)) Config::SaveConfig();
-                
-                ImGui::Spacing();
-                
-                // Width
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Outline Width");
-                if (ImGui::SliderFloat("##OutlineWidth", &RF::params.model_outline_width, 0.5f, 4.0f, "%.1f")) Config::SaveConfig();
-                
-                // Depth threshold
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Edge Sensitivity");
-                if (ImGui::SliderFloat("##DepthThresh", &RF::params.model_depth_threshold, 0.02f, 0.5f, "%.2f")) Config::SaveConfig();
-                
-                // Opacity
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Opacity");
-                if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.model_outline_opacity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-                
-                // High quality mode extra settings
-                if (RF::params.model_outline_mode == 0) {
-                    ImGui::Spacing();
-                    ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Advanced Settings");
-                    
-                    ImGui::SetNextItemWidth(-10);
-                    if (ImGui::SliderFloat("##ColorThresh", &RF::params.model_color_threshold, 0.05f, 0.5f, "Color: %.2f")) Config::SaveConfig();
-                    
-                    ImGui::SetNextItemWidth(-10);
-                    if (ImGui::SliderFloat("##NormalThresh", &RF::params.model_normal_threshold, 0.1f, 1.0f, "Smooth: %.2f")) Config::SaveConfig();
-                }
-            }
-            
-            ImGui::Separator();
             ImGui::Spacing();
             
             // Sharpen
