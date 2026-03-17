@@ -121,7 +121,6 @@ namespace RF {
         float model_outline_normal_thresh = 0.08f;   // 法线差异阈值
         float model_outline_width = 1.0f;            // 描边宽度
         float model_outline_opacity = 0.85f;         // 描边透明度
-        bool model_outline_use_black = true;         // 使用纯黑描边
     };
     
     FilterParams params;
@@ -211,7 +210,6 @@ namespace Config {
         if (j.contains("model_outline_normal_thresh")) RF::params.model_outline_normal_thresh = j["model_outline_normal_thresh"];
         if (j.contains("model_outline_width")) RF::params.model_outline_width = j["model_outline_width"];
         if (j.contains("model_outline_opacity")) RF::params.model_outline_opacity = j["model_outline_opacity"];
-        if (j.contains("model_outline_use_black")) RF::params.model_outline_use_black = j["model_outline_use_black"];
         
         LOGI("Configuration loaded successfully");
         return true;
@@ -251,7 +249,6 @@ namespace Config {
         j["model_outline_normal_thresh"] = RF::params.model_outline_normal_thresh;
         j["model_outline_width"] = RF::params.model_outline_width;
         j["model_outline_opacity"] = RF::params.model_outline_opacity;
-        j["model_outline_use_black"] = RF::params.model_outline_use_black;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -532,7 +529,6 @@ uniform float uDepthThresh;      // 深度差异阈值
 uniform float uNormalThresh;     // 法线差异阈值
 uniform float uOutlineWidth;     // 描边宽度
 uniform float uOpacity;          // 描边透明度
-uniform int uUseBlackOutline;    // 是否使用纯黑描边
 
 // 计算亮度作为深度近似
 float luminance(vec3 c) {
@@ -644,15 +640,33 @@ void main() {
     // 深度边缘受平面抑制影响（减少纹理内的假边缘）
     float finalEdge = max(depthOutline * (1.0 - planarSuppress * 0.5), normalOutline);
     
-    // 5. 绘制描边
+    // 5. 绘制描边 - 使用更深更鲜艳的颜色
     vec3 outlineColor;
-    if (uUseBlackOutline == 1) {
-        // 纯黑描边
-        outlineColor = vec3(0.0);
-    } else {
-        // 使用原色的深色版本
-        outlineColor = original.rgb * 0.15;
+    
+    // HSV转换
+    vec3 rgb2hsv(vec3 c) {
+        vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+        vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+        vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+        float d = q.x - min(q.w, q.y);
+        float e = 1.0e-10;
+        return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
     }
+    
+    vec3 hsv2rgb(vec3 c) {
+        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
+    
+    vec3 hsv = rgb2hsv(original.rgb);
+    
+    // 更深：降低明度
+    hsv.z = clamp(hsv.z * 0.35, 0.0, 1.0);
+    // 更鲜艳：提高饱和度
+    hsv.y = clamp(hsv.y * 1.4 + 0.15, 0.0, 1.0);
+    
+    outlineColor = hsv2rgb(hsv);
     
     vec3 result = mix(original.rgb, outlineColor, finalEdge * uOpacity);
     
@@ -1444,8 +1458,6 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_width);
         loc = glGetUniformLocation(RF::prog_model_outline, "uOpacity");
         SAFE_UNIFORM(loc, glUniform1f, RF::params.model_outline_opacity);
-        loc = glGetUniformLocation(RF::prog_model_outline, "uUseBlackOutline");
-        SAFE_UNIFORM(loc, glUniform1i, RF::params.model_outline_use_black ? 1 : 0);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         final_tex = dst_tex;
@@ -1857,8 +1869,6 @@ static void DrawUI() {
                 ImGui::SetNextItemWidth(-10);
                 ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Opacity");
                 if (ImGui::SliderFloat("##ModelOutlineOpacity", &RF::params.model_outline_opacity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-                
-                if (ImGui::Checkbox("Pure Black Outline##Model", &RF::params.model_outline_use_black)) Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
