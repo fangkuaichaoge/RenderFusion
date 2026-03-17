@@ -943,10 +943,6 @@ void main() {
     
     gl_FragColor = vec4(mix(color.rgb, pencil, uIntensity), color.a);
 }
-)";
-
-)";
-
 // 法线凹凸效果着色器 (Normal Bump Effect) - 真正的凹凸效果
 const char* g_frag_normal_bump = R"(
 precision highp float;
