@@ -567,10 +567,10 @@ void main() {
     // 平滑边缘
     float isEdge = smoothstep(uThresh * 0.5, uThresh * 1.5, edge);
     
-    // 计算描边颜色：更鲜艳
+    // 计算描边颜色：更深更鲜艳
     vec3 hsv = rgb2hsv(original.rgb);
-    hsv.y = clamp(hsv.y * 1.5 + 0.3, 0.0, 1.0);  // 大幅提高饱和度
-    hsv.z = clamp(hsv.z * 1.1 + 0.1, 0.0, 1.0);  // 略微提亮
+    hsv.z = clamp(hsv.z * 0.6, 0.0, 1.0);  // 更深
+    hsv.y = clamp(hsv.y * 1.1 + 0.1, 0.0, 1.0);  // 略微鲜艳
     vec3 outlineColor = hsv2rgb(hsv);
     
     vec3 result = mix(original.rgb, outlineColor, isEdge * uOpacity);
