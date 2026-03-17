@@ -127,12 +127,6 @@ namespace RF {
         bool enable_normal_bump = false;         // 启用法线凹凸效果
         float normal_bump_intensity = 0.5f;      // 凹凸强度
         float normal_bump_scale = 1.0f;          // 凹凸缩放
-        
-        // Normal Map (法线贴图凹凸效果)
-        bool enable_normal_map = false;
-        float normal_map_intensity = 0.5f;       // 凹凸强度 (0.0-2.0)
-        float normal_map_depth = 1.0f;           // 凹凸深度 (0.0-2.0)
-        float normal_map_scale = 1.0f;           // 法线贴图缩放 (0.1-5.0)
     };
     
     FilterParams params;
