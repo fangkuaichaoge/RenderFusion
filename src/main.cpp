@@ -124,11 +124,11 @@ namespace RF {
         
         // Normal Effect (法线效果)
         bool enable_normal = false;
-        float normal_depth = 2.0f;           // 凹凸深度
+        float normal_depth = 4.0f;           // 凹凸深度
         float normal_light_x = 0.5f;         // 光源X方向
         float normal_light_y = 0.5f;         // 光源Y方向
         float normal_light_z = 1.0f;         // 光源高度
-        float normal_intensity = 0.7f;       // 效果强度
+        float normal_intensity = 0.9f;       // 效果强度
     };
     
     FilterParams params;
@@ -605,7 +605,7 @@ void main() {
 
 // ==========================================
 // 法线效果 Shader (Normal Effect)
-// 从图像估算法线，产生伪3D凹凸质感
+// 从图像估算法线，产生强烈的伪3D凹凸质感
 // ==========================================
 const char* g_frag_normal = R"(
 precision highp float;
@@ -624,39 +624,62 @@ float luminance(vec3 c) {
 
 void main() {
     vec4 original = texture2D(uTexture, vTexCoord);
+    vec2 tex = uTexelSize;
     
-    // 计算亮度梯度作为法线
-    float scale = uDepth;
-    float l = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * uTexelSize).rgb);
-    float r = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * uTexelSize).rgb);
-    float t = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * uTexelSize).rgb);
-    float b = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * uTexelSize).rgb);
+    // 多尺度采样获取更强的深度感
+    float scale = uDepth * 2.0;
     
-    // 估算法线
-    float dx = (r - l) * scale;
-    float dy = (b - t) * scale;
-    vec3 normal = normalize(vec3(-dx, -dy, 1.0));
+    // 采样更大范围
+    float c  = luminance(original.rgb);
+    float l1 = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0, 0.0) * tex).rgb);
+    float r1 = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0, 0.0) * tex).rgb);
+    float t1 = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0,-1.0) * tex).rgb);
+    float b1 = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0, 1.0) * tex).rgb);
+    
+    // 二级采样
+    float l2 = luminance(texture2D(uTexture, vTexCoord + vec2(-2.0, 0.0) * tex).rgb);
+    float r2 = luminance(texture2D(uTexture, vTexCoord + vec2( 2.0, 0.0) * tex).rgb);
+    float t2 = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0,-2.0) * tex).rgb);
+    float b2 = luminance(texture2D(uTexture, vTexCoord + vec2( 0.0, 2.0) * tex).rgb);
+    
+    // 对角采样
+    float tl = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0,-1.0) * tex).rgb);
+    float tr = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0,-1.0) * tex).rgb);
+    float bl = luminance(texture2D(uTexture, vTexCoord + vec2(-1.0, 1.0) * tex).rgb);
+    float br = luminance(texture2D(uTexture, vTexCoord + vec2( 1.0, 1.0) * tex).rgb);
+    
+    // Sobel + 多尺度梯度
+    float dx = (r1 - l1) * 2.0 + (r2 - l2) + (tr - tl) + (br - bl);
+    float dy = (b1 - t1) * 2.0 + (b2 - t2) + (bl - tl) + (br - tr);
+    
+    // 法线向量
+    vec3 normal = normalize(vec3(-dx * scale, -dy * scale, 1.0));
     
     // 光源方向
     vec3 lightDir = normalize(vec3(uLightX, uLightY, uLightZ));
     
-    // 计算漫反射光照
+    // 强化漫反射
     float diff = max(dot(normal, lightDir), 0.0);
+    diff = pow(diff, 0.8); // 增强对比
     
-    // 环境光 + 漫反射
-    float ambient = 0.3;
-    float lighting = ambient + diff * 0.7;
+    // 环境光很低，让凹凸更明显
+    float ambient = 0.2;
+    float lighting = ambient + diff * 0.8;
     
-    // 应用光照到颜色
-    vec3 litColor = original.rgb * lighting;
-    
-    // 添加高光
+    // 强烈的高光
     vec3 viewDir = vec3(0.0, 0.0, 1.0);
     vec3 halfDir = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
-    litColor += vec3(spec * 0.3);
+    float spec = pow(max(dot(normal, halfDir), 0.0), 16.0);
     
-    // 混合原色和效果
+    // 应用光照
+    vec3 litColor = original.rgb * lighting;
+    litColor += vec3(spec * 0.5 * diff); // 高光随漫反射变化
+    
+    // 添加暗部阴影，增强立体感
+    float shadow = 1.0 - max(0.0, -dot(normal, lightDir)) * 0.4;
+    litColor *= shadow;
+    
+    // 混合
     vec3 result = mix(original.rgb, litColor, uIntensity);
     
     gl_FragColor = vec4(result, original.a);
@@ -1909,7 +1932,7 @@ static void DrawUI() {
             if (RF::params.enable_normal) {
                 ImGui::SetNextItemWidth(-10);
                 ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Depth");
-                if (ImGui::SliderFloat("##NormalDepth", &RF::params.normal_depth, 0.5f, 5.0f, "%.1f")) Config::SaveConfig();
+                if (ImGui::SliderFloat("##NormalDepth", &RF::params.normal_depth, 1.0f, 10.0f, "%.1f")) Config::SaveConfig();
                 
                 ImGui::SetNextItemWidth(-10);
                 ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Light X");
