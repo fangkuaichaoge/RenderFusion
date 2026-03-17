@@ -1755,7 +1755,7 @@ static void DrawUI() {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Vivid color edge outline");
             }
-            if (ImGui::Checkbox("Enable##VividOutline", &RF::params.enable_geo_outline)) Config::SaveConfig();
+            if (ImGui::Checkbox("Enable##VividOutline", &RF::params.enable_vivid_outline)) Config::SaveConfig();
             if (RF::params.enable_vivid_outline) {
                 ImGui::SetNextItemWidth(-10);
                 ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Threshold");
