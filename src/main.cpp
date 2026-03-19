@@ -857,8 +857,14 @@ void main() {
 )";
 
 // ==========================================
-// 3D Parallax Bump Shader (Screen-Space Parallax Mapping)
-// 无描边、无线条、原色保留，仅做 UV 偏移实现 3D 凹凸
+// 3D Relief/Bump Effect (Screen-Space)
+// 屏幕空间浮雕凸起效果
+// 
+// 核心原理：
+// 1. 高度图：图像亮度 → 高度值（亮凸暗凹）
+// 2. 法线计算：通过高度图梯度生成表面法线
+// 3. 光照计算：法线与光源点乘产生凹凸明暗
+// 4. UV偏移：沿梯度方向微调采样位置增强立体感
 // ==========================================
 const char* g_frag_parallax_3d = R"(
 precision highp float;
@@ -869,107 +875,118 @@ uniform float uDepth;
 uniform float uScale;
 uniform float uRotation;
 
-// 计算法线（基于屏幕空间微分）
-#define getNormal(pos) normalize(cross(dFdx(pos), dFdy(pos)))
-
-// TBN 矩阵构建（简化版，适配全屏后处理）
-highp mat3 tbnMatrix(highp vec3 normal) {
-    vec3 T = normal.yzx;
-    vec3 B = normal.xyz;
-    vec3 N = normal.zxy;
-    return mat3(T, B, N);
-}
-
-// 视差坐标转换
-highp vec3 GetParallaxCoord(highp vec3 normal, highp vec3 wp) {
-    if(normal.y > 0.5)
-        wp = wp;
-    if(normal.y < -0.5)
-        wp = vec3(-wp.x, -wp.y, wp.z);
-    if(normal.x > 0.5)
-        wp = vec3(wp.z, -wp.x, wp.y);
-    if(normal.x < -0.5)
-        wp = vec3(-wp.z, wp.x, wp.y);
-    if(normal.z > 0.5)
-        wp = vec3(-wp.x, -wp.z, wp.y);
-    if(normal.z < -0.5)
-        wp = vec3(wp.x, wp.z, wp.y);
-    return wp;
-}
-
-// 旋转矩阵
-highp mat3 rotationMatrix(highp float angle) {
-    float c = cos(angle);
-    float s = sin(angle);
-    return mat3(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0);
-}
-
-// 完整版 TBN 矩阵计算（基于微分推导切线空间）
-mat3 getTBN(vec2 uv, vec3 pos) {
-    vec2 dx_uv = dFdx(uv);
-    vec2 dy_uv = dFdy(uv);
-    vec3 dx_pos = dFdx(pos);
-    vec3 dy_pos = dFdy(pos);
-    
-    // 计算逆行列式，避免除零
-    float det = dx_uv.x * dy_uv.y - dx_uv.y * dx_uv.x;
-    if (abs(det) < 1e-6) {
-        return mat3(1.0);
-    }
-    float inv_det = 1.0 / det;
-    
-    // 计算切线 T、副切线 B
-    vec3 T = (dy_pos * dx_uv.x - dx_pos * dy_uv.x) * inv_det;
-    vec3 B = (dx_pos * dy_uv.y - dy_pos * dx_uv.y) * inv_det;
-    
-    // 计算法线 N（叉乘 T、B，正交化）
-    vec3 N = normalize(cross(T, B));
-    T = normalize(T);
-    B = normalize(B);
-    
-    return mat3(T, B, N);
-}
-
-// 高度图生成（基于原图亮度，灰度=高度）
+// ========================================
+// 1. 高度图生成
+// ========================================
 float getHeight(vec2 uv) {
     vec3 color = texture2D(uTexture, uv).rgb;
-    // 标准亮度权重，生成灰度高度值
-    return dot(color, vec3(0.299, 0.587, 0.114));
+    float h = dot(color, vec3(0.299, 0.587, 0.114));
+    // 增强对比度
+    h = smoothstep(0.2, 0.8, h);
+    return h;
 }
 
-// 视差 UV 偏移（核心：3D 凹凸位移，无颜色修改）
-vec2 parallaxUV(vec2 baseUV, vec3 viewDirTS, float scale) {
-    float height = getHeight(baseUV);
-    // 按高度+视线方向偏移 UV，仅做位移，不改变颜色
-    return baseUV + viewDirTS.xy * height * scale;
+// ========================================
+// 2. 计算高度图梯度（用于法线和偏移方向）
+// ========================================
+vec2 getHeightGradient(vec2 uv) {
+    float left   = getHeight(uv + vec2(-uTexelSize.x, 0.0));
+    float right  = getHeight(uv + vec2( uTexelSize.x, 0.0));
+    float top    = getHeight(uv + vec2(0.0, -uTexelSize.y));
+    float bottom = getHeight(uv + vec2(0.0,  uTexelSize.y));
+    
+    // 梯度向量（指向高度增加方向）
+    return vec2(right - left, bottom - top);
 }
 
+// ========================================
+// 3. 从梯度重建表面法线
+// ========================================
+vec3 getSurfaceNormal(vec2 uv) {
+    vec2 grad = getHeightGradient(uv);
+    // 法线 = (-grad.x, -grad.y, strength)
+    // strength 越大，凹凸越细腻
+    float strength = 1.0 / max(uScale, 0.001);
+    return normalize(vec3(-grad.x, -grad.y, strength));
+}
+
+// ========================================
+// 4. 简单视差UV偏移（基于高度和梯度）
+// ========================================
+vec2 getParallaxUV(vec2 uv, float height, vec2 gradient) {
+    // 沿梯度方向偏移，高度越高偏移越大
+    // 这会产生"亮处凸起"的视觉效果
+    vec2 offset = normalize(gradient + vec2(0.001)) * height * uScale;
+    return uv + offset;
+}
+
+// ========================================
 // 主函数
+// ========================================
 void main() {
     vec2 uv = vTexCoord;
+    vec4 originalColor = texture2D(uTexture, uv);
     
-    // 构建屏幕空间坐标（适配全屏后处理，范围[-1,1]）
-    vec3 screenPos = vec3(uv * 2.0 - 1.0, 0.0);
+    // 获取高度和梯度
+    float height = getHeight(uv);
+    vec2 gradient = getHeightGradient(uv);
     
-    // 视图方向（面向屏幕，Z轴负方向）
-    vec3 viewDirWS = vec3(0.0, 0.0, -1.0);
+    // ========================================
+    // 效果1：UV偏移（浮雕效果）
+    // ========================================
+    vec2 offsetUV = uv;
     
-    // 计算 TBN 矩阵，转换视图方向到切线空间
-    mat3 TBN = getTBN(uv, screenPos);
-    vec3 viewDirTS = normalize(transpose(TBN) * viewDirWS);
+    // 应用旋转到偏移方向
+    float c = cos(uRotation);
+    float s = sin(uRotation);
+    vec2 rotatedGradient = vec2(
+        gradient.x * c - gradient.y * s,
+        gradient.x * s + gradient.y * c
+    );
     
-    // 应用旋转
-    viewDirTS = rotationMatrix(uRotation) * viewDirTS;
+    // 沿旋转后的梯度方向偏移
+    offsetUV += normalize(rotatedGradient + vec2(0.001)) * (height - 0.5) * uScale * uDepth;
     
-    // 计算偏移后的 UV（真正的 3D 凹凸位移）
-    vec2 finalUV = parallaxUV(uv, viewDirTS, uScale);
+    // 边界保护
+    offsetUV = clamp(offsetUV, uTexelSize * 2.0, vec2(1.0) - uTexelSize * 2.0);
     
-    // 应用深度调整
-    float depth = getHeight(finalUV);
-    finalUV = mix(uv, finalUV, uDepth);
+    vec4 displacedColor = texture2D(uTexture, offsetUV);
     
-    // 仅采样，不修改任何颜色，保留原色
-    gl_FragColor = texture2D(uTexture, finalUV);
+    // ========================================
+    // 效果2：法线光照（凹凸明暗）
+    // ========================================
+    vec3 normal = getSurfaceNormal(uv);
+    
+    // 光源方向（可旋转）
+    vec3 lightDir = normalize(vec3(
+        sin(uRotation) * 0.5,
+        cos(uRotation) * 0.5,
+        1.0
+    ));
+    
+    // 漫反射光照
+    float diffuse = max(dot(normal, lightDir), 0.0);
+    diffuse = diffuse * 0.6 + 0.7; // 柔和化，避免过暗
+    
+    // ========================================
+    // 效果3：边缘增强（高通滤波）
+    // ========================================
+    float edge = length(gradient);
+    edge = smoothstep(0.01, 0.15, edge);
+    
+    // ========================================
+    // 最终合成
+    // ========================================
+    vec3 result = displacedColor.rgb * diffuse;
+    
+    // 轻微边缘高光
+    result += edge * 0.15 * vec3(1.0);
+    
+    // 与原图混合
+    float intensity = uDepth * 2.0;
+    result = mix(originalColor.rgb, result, clamp(intensity, 0.0, 1.0));
+    
+    gl_FragColor = vec4(result, originalColor.a);
 }
 )";
 
