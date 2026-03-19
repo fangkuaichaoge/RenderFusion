@@ -1103,9 +1103,6 @@ void main() {
     float val = hsv.z;
     
     // 扩大绿色检测范围：包括深绿 (hue: 0.05-0.52)
-    // 深绿/墨绿: 0.05-0.15
-    // 普通绿: 0.15-0.35
-    // 青绿: 0.35-0.52
     bool isGreen = (hue > 0.05 && hue < 0.52) && sat > 0.08;
     
     if (isGreen) {
@@ -1124,47 +1121,44 @@ void main() {
             greenness = smoothstep(0.0, 0.6, (0.52 - hue) / 0.17);
         }
         
-        // 冰雪白 - 极低饱和度，高亮度
-        float newSat = sat * 0.05; // 极低饱和度，接近纯白
-        float newVal = val * 1.18 + 0.28; // 更大幅度提亮
-        newVal = min(newVal, 1.0);
+        // 冰雪白 - 低饱和度，适中亮度
+        float newSat = sat * 0.08; // 低饱和度
+        float newVal = val * 1.08 + 0.15; // 适度提亮
+        newVal = min(newVal, 0.92); // 不要太白
         
-        // 非常轻微的淡蓝偏移
+        // 轻微的淡蓝偏移
         float icyHue = 0.60 + random(vTexCoord) * 0.02;
         
         vec3 icyColor = hsv2rgb(vec3(icyHue, newSat, newVal));
-        result = mix(result, icyColor, greenness * 0.92);
+        result = mix(result, icyColor, greenness * 0.88);
     }
     
-    // 整体冷色调 - 浅蓝白调
-    vec3 coldTint = vec3(0.96, 0.98, 1.02);
+    // 整体冷色调 - 淡蓝调
+    vec3 coldTint = vec3(0.94, 0.97, 1.02);
     result *= coldTint;
     
-    // 更大幅度降低饱和度 - 雪白世界
+    // 降低饱和度 - 雪白世界
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 0.6);
+    result = mix(vec3(gray), result, 0.55);
     
-    // 更大幅度提亮 - 雪地明亮反光
-    result = result * 1.1 + 0.1;
+    // 适度提亮
+    result = result * 1.04 + 0.05;
     
     // 柔和对比度
-    result = (result - 0.5) * 0.85 + 0.5;
+    result = (result - 0.5) * 0.9 + 0.5;
     
-    // 冰霜高光 - 更白更亮
+    // 冰霜高光
     float lum = dot(result, vec3(0.299, 0.587, 0.114));
-    if (lum > 0.6) {
-        vec3 frostHighlight = vec3(0.97, 0.99, 1.0);
-        result = mix(result, result * frostHighlight + 0.06, (lum - 0.6) * 0.6);
+    if (lum > 0.65) {
+        vec3 frostHighlight = vec3(0.96, 0.98, 1.0);
+        result = mix(result, result * frostHighlight + 0.03, (lum - 0.65) * 0.4);
     }
     
     // 微妙的雪花闪烁效果
     float snowSparkle = random(vTexCoord * 200.0 + uTime * 0.3);
-    if (snowSparkle > 0.997 && lum > 0.35) {
-        result += vec3(0.12, 0.13, 0.14);
+    if (snowSparkle > 0.997 && lum > 0.4) {
+        result += vec3(0.08, 0.09, 0.1);
     }
-    
-    // 整体再提亮
-    result = result * 1.03 + 0.03;
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
