@@ -556,168 +556,126 @@ precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
-uniform float uPixelSize;      // 像素大小 (1, 2, 3, 4)
-uniform int uPalette;          // 调色板: 0=Off, 1=GameBoy, 2=Sweetie16, 3=Endesga32
+uniform float uPixelSize;
+uniform int uPalette;
 uniform float uIntensity;
 
-// sRGB 转 Linear
-float srgbToLinear(float c) {
-    c = c / 255.0;
-    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+// 计算颜色距离（简化版RGB距离）
+float colorDist(vec3 c1, vec3 c2) {
+    return dot(c1-c2, c1-c2);
 }
 
-// RGB 转 XYZ
-vec3 rgbToXyz(float r, float g, float b) {
-    float lr = srgbToLinear(r);
-    float lg = srgbToLinear(g);
-    float lb = srgbToLinear(b);
-    return vec3(
-        lr * 0.4124564 + lg * 0.3575761 + lb * 0.1804375,
-        lr * 0.2126729 + lg * 0.7151522 + lb * 0.0721750,
-        lr * 0.0193339 + lg * 0.1191920 + lb * 0.9503041
-    );
-}
-
-// XYZ 转 Lab
-vec3 xyzToLab(float x, float y, float z) {
-    float xn = 0.95047, yn = 1.0, zn = 1.08883;
-    float fx = x / xn > 0.008856 ? pow(x / xn, 1.0/3.0) : (7.787 * x / xn + 16.0/116.0);
-    float fy = y / yn > 0.008856 ? pow(y / yn, 1.0/3.0) : (7.787 * y / yn + 16.0/116.0);
-    float fz = z / zn > 0.008856 ? pow(z / zn, 1.0/3.0) : (7.787 * z / zn + 16.0/116.0);
-    return vec3(116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz));
-}
-
-// RGB 转 Lab
-vec3 rgbToLab(vec3 rgb) {
-    vec3 xyz = rgbToXyz(rgb.r * 255.0, rgb.g * 255.0, rgb.b * 255.0);
-    return xyzToLab(xyz.x, xyz.y, xyz.z);
-}
-
-// Lab 色差计算
-float labDistance(vec3 lab1, vec3 lab2) {
-    float dL = lab1.x - lab2.x;
-    float da = lab1.y - lab2.y;
-    float db = lab1.z - lab2.z;
-    return dL * dL * 1.2 + da * da + db * db;
-}
-
-// Game Boy 调色板 (4色)
-vec3 gameboyPalette[4] = vec3[](
-    vec3(15.0/255.0, 56.0/255.0, 15.0/255.0),   // 最深绿
-    vec3(48.0/255.0, 98.0/255.0, 48.0/255.0),   // 深绿
-    vec3(139.0/255.0, 172.0/255.0, 15.0/255.0), // 浅绿
-    vec3(155.0/255.0, 188.0/255.0, 15.0/255.0)  // 最浅绿
-);
-
-// Sweetie 16 调色板 (16色)
-vec3 sweetie16Palette[16] = vec3[](
-    vec3(26.0/255.0, 28.0/255.0, 44.0/255.0),   // 深蓝紫
-    vec3(51.0/255.0, 60.0/255.0, 87.0/255.0),   // 暗蓝灰
-    vec3(37.0/255.0, 113.0/255.0, 121.0/255.0), // 深青
-    vec3(41.0/255.0, 54.0/255.0, 111.0/255.0),  // 深蓝
-    vec3(93.0/255.0, 39.0/255.0, 93.0/255.0),   // 深紫
-    vec3(177.0/255.0, 62.0/255.0, 83.0/255.0),  // 深红
-    vec3(239.0/255.0, 125.0/255.0, 87.0/255.0), // 橙
-    vec3(255.0/255.0, 205.0/255.0, 117.0/255.0),// 黄
-    vec3(167.0/255.0, 240.0/255.0, 112.0/255.0),// 亮绿
-    vec3(56.0/255.0, 183.0/255.0, 100.0/255.0), // 绿
-    vec3(59.0/255.0, 93.0/255.0, 201.0/255.0),  // 蓝
-    vec3(65.0/255.0, 166.0/255.0, 246.0/255.0), // 亮蓝
-    vec3(115.0/255.0, 239.0/255.0, 247.0/255.0),// 青
-    vec3(148.0/255.0, 176.0/255.0, 194.0/255.0),// 浅灰
-    vec3(0.0/255.0, 0.0/255.0, 0.0/255.0),      // 黑
-    vec3(255.0/255.0, 255.0/255.0, 255.0/255.0) // 白
-);
-
-// Endesga 32 调色板 (32色)
-vec3 endesga32Palette[32] = vec3[](
-    vec3(0.0/255.0, 0.0/255.0, 0.0/255.0),         // 黑
-    vec3(63.0/255.0, 40.0/255.0, 50.0/255.0),      // 深红棕
-    vec3(84.0/255.0, 62.0/255.0, 44.0/255.0),      // 深棕
-    vec3(116.0/255.0, 63.0/255.0, 57.0/255.0),     // 棕红
-    vec3(184.0/255.0, 111.0/255.0, 80.0/255.0),    // 棕橙
-    vec3(190.0/255.0, 74.0/255.0, 47.0/255.0),     // 橙红
-    vec3(229.0/255.0, 59.0/255.0, 68.0/255.0),     // 亮红
-    vec3(158.0/255.0, 40.0/255.0, 53.0/255.0),     // 红
-    vec3(251.0/255.0, 146.0/255.0, 43.0/255.0),    // 亮橙
-    vec3(215.0/255.0, 118.0/255.0, 67.0/255.0),    // 橙
-    vec3(174.0/255.0, 118.0/255.0, 65.0/255.0),    // 棕
-    vec3(204.0/255.0, 127.0/255.0, 93.0/255.0),    // 肉色
-    vec3(228.0/255.0, 166.0/255.0, 114.0/255.0),   // 浅棕
-    vec3(232.0/255.0, 183.0/255.0, 150.0/255.0),   // 浅肉色
-    vec3(234.0/255.0, 212.0/255.0, 170.0/255.0),   // 米色
-    vec3(245.0/255.0, 221.0/255.0, 176.0/255.0),   // 浅米
-    vec3(255.0/255.0, 231.0/255.0, 98.0/255.0),    // 黄
-    vec3(99.0/255.0, 198.0/255.0, 77.0/255.0),     // 绿
-    vec3(50.0/255.0, 115.0/255.0, 69.0/255.0),     // 深绿
-    vec3(25.0/255.0, 61.0/255.0, 63.0/255.0),      // 深青
-    vec3(50.0/255.0, 60.0/255.0, 95.0/255.0),      // 深蓝
-    vec3(54.0/255.0, 63.0/255.0, 91.0/255.0),      // 暗蓝灰
-    vec3(82.0/255.0, 95.0/255.0, 140.0/255.0),     // 蓝紫
-    vec3(91.0/255.0, 123.0/255.0, 179.0/255.0),    // 蓝
-    vec3(108.0/255.0, 158.0/255.0, 216.0/255.0),   // 天蓝
-    vec3(132.0/255.0, 182.0/255.0, 235.0/255.0),   // 浅蓝
-    vec3(157.0/255.0, 200.0/255.0, 231.0/255.0),   // 淡蓝
-    vec3(169.0/255.0, 191.0/255.0, 227.0/255.0),   // 淡紫蓝
-    vec3(175.0/255.0, 191.0/255.0, 210.0/255.0),   // 浅灰蓝
-    vec3(195.0/255.0, 221.0/255.0, 232.0/255.0),   // 极淡蓝
-    vec3(88.0/255.0, 104.0/255.0, 132.0/255.0),    // 蓝灰
-    vec3(255.0/255.0, 255.0/255.0, 255.0/255.0)    // 白
-);
-
-// 在调色板中找最接近的颜色
-vec3 findBestColor(vec3 color, int palette) {
-    vec3 lab = rgbToLab(color);
-    vec3 bestColor = color;
-    float bestDist = 1e10;
+// Game Boy 调色板找最近色
+vec3 findGameBoyColor(vec3 c) {
+    vec3 p0 = vec3(0.059, 0.220, 0.059);
+    vec3 p1 = vec3(0.188, 0.384, 0.188);
+    vec3 p2 = vec3(0.545, 0.675, 0.059);
+    vec3 p3 = vec3(0.608, 0.737, 0.059);
     
-    if (palette == 1) { // Game Boy
-        for (int i = 0; i < 4; i++) {
-            vec3 paletteLab = rgbToLab(gameboyPalette[i]);
-            float dist = labDistance(lab, paletteLab);
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestColor = gameboyPalette[i];
-            }
-        }
-    } else if (palette == 2) { // Sweetie 16
-        for (int i = 0; i < 16; i++) {
-            vec3 paletteLab = rgbToLab(sweetie16Palette[i]);
-            float dist = labDistance(lab, paletteLab);
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestColor = sweetie16Palette[i];
-            }
-        }
-    } else if (palette == 3) { // Endesga 32
-        for (int i = 0; i < 32; i++) {
-            vec3 paletteLab = rgbToLab(endesga32Palette[i]);
-            float dist = labDistance(lab, paletteLab);
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestColor = endesga32Palette[i];
-            }
-        }
+    float d0 = colorDist(c, p0); float d1 = colorDist(c, p1);
+    float d2 = colorDist(c, p2); float d3 = colorDist(c, p3);
+    
+    float minD = min(min(d0, d1), min(d2, d3));
+    if (minD == d0) return p0;
+    if (minD == d1) return p1;
+    if (minD == d2) return p2;
+    return p3;
+}
+
+// Sweetie 16 调色板找最近色
+vec3 findSweetie16Color(vec3 c) {
+    vec3 p[16];
+    p[0] = vec3(0.102, 0.110, 0.173);
+    p[1] = vec3(0.200, 0.235, 0.341);
+    p[2] = vec3(0.145, 0.443, 0.475);
+    p[3] = vec3(0.161, 0.212, 0.435);
+    p[4] = vec3(0.365, 0.153, 0.365);
+    p[5] = vec3(0.694, 0.243, 0.325);
+    p[6] = vec3(0.937, 0.490, 0.341);
+    p[7] = vec3(1.000, 0.804, 0.459);
+    p[8] = vec3(0.655, 0.941, 0.439);
+    p[9] = vec3(0.220, 0.718, 0.392);
+    p[10] = vec3(0.231, 0.365, 0.788);
+    p[11] = vec3(0.255, 0.651, 0.965);
+    p[12] = vec3(0.451, 0.937, 0.969);
+    p[13] = vec3(0.580, 0.690, 0.761);
+    p[14] = vec3(0.000, 0.000, 0.000);
+    p[15] = vec3(1.000, 1.000, 1.000);
+    
+    float minDist = 999.0;
+    vec3 best = c;
+    for (int i = 0; i < 16; i++) {
+        float d = colorDist(c, p[i]);
+        if (d < minDist) { minDist = d; best = p[i]; }
     }
+    return best;
+}
+
+// Endesga 32 调色板找最近色
+vec3 findEndesga32Color(vec3 c) {
+    vec3 p[32];
+    p[0] = vec3(0.000, 0.000, 0.000);
+    p[1] = vec3(0.247, 0.157, 0.196);
+    p[2] = vec3(0.329, 0.243, 0.173);
+    p[3] = vec3(0.455, 0.247, 0.224);
+    p[4] = vec3(0.722, 0.435, 0.314);
+    p[5] = vec3(0.745, 0.290, 0.184);
+    p[6] = vec3(0.898, 0.231, 0.267);
+    p[7] = vec3(0.620, 0.157, 0.208);
+    p[8] = vec3(0.984, 0.573, 0.169);
+    p[9] = vec3(0.843, 0.463, 0.263);
+    p[10] = vec3(0.682, 0.463, 0.255);
+    p[11] = vec3(0.800, 0.498, 0.365);
+    p[12] = vec3(0.894, 0.651, 0.447);
+    p[13] = vec3(0.910, 0.718, 0.588);
+    p[14] = vec3(0.918, 0.831, 0.667);
+    p[15] = vec3(0.961, 0.867, 0.690);
+    p[16] = vec3(1.000, 0.906, 0.384);
+    p[17] = vec3(0.388, 0.776, 0.302);
+    p[18] = vec3(0.196, 0.451, 0.271);
+    p[19] = vec3(0.098, 0.239, 0.247);
+    p[20] = vec3(0.196, 0.235, 0.373);
+    p[21] = vec3(0.212, 0.247, 0.357);
+    p[22] = vec3(0.322, 0.373, 0.549);
+    p[23] = vec3(0.357, 0.482, 0.702);
+    p[24] = vec3(0.424, 0.620, 0.847);
+    p[25] = vec3(0.518, 0.714, 0.922);
+    p[26] = vec3(0.616, 0.784, 0.906);
+    p[27] = vec3(0.663, 0.749, 0.890);
+    p[28] = vec3(0.686, 0.749, 0.824);
+    p[29] = vec3(0.765, 0.867, 0.910);
+    p[30] = vec3(0.345, 0.408, 0.518);
+    p[31] = vec3(1.000, 1.000, 1.000);
     
-    return bestColor;
+    float minDist = 999.0;
+    vec3 best = c;
+    for (int i = 0; i < 32; i++) {
+        float d = colorDist(c, p[i]);
+        if (d < minDist) { minDist = d; best = p[i]; }
+    }
+    return best;
+}
+
+// 根据调色板类型找最近色
+vec3 quantizeColor(vec3 c, int palette) {
+    if (palette == 1) return findGameBoyColor(c);
+    if (palette == 2) return findSweetie16Color(c);
+    if (palette == 3) return findEndesga32Color(c);
+    return c;
 }
 
 void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     
-    // 1. 像素化：将坐标对齐到像素网格
+    // 像素化：将坐标对齐到像素网格
     vec2 pixelGrid = uTexelSize * uPixelSize;
     vec2 pixelCoord = floor(vTexCoord / pixelGrid) * pixelGrid + pixelGrid * 0.5;
     
     // 采样像素化后的颜色
     vec3 pixelColor = texture2D(uTexture, pixelCoord).rgb;
     
-    // 2. 颜色量化到调色板
-    vec3 result = pixelColor;
-    if (uPalette > 0) {
-        result = findBestColor(pixelColor, uPalette);
-    }
+    // 颜色量化到调色板
+    vec3 result = quantizeColor(pixelColor, uPalette);
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
@@ -2341,7 +2299,11 @@ static void DrawUI() {
                 ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Pixel Size");
                 const char* pixel_sizes[] = {"1px", "2px", "3px", "4px"};
                 ImGui::SetNextItemWidth(-10);
-                if (ImGui::Combo("##PixelSize", &RF::params.pixel_size, pixel_sizes, IM_ARRAYSIZE(pixel_sizes))) Config::SaveConfig();
+                int pixel_idx = RF::params.pixel_size - 1;  // 转换为索引 (0-3)
+                if (ImGui::Combo("##PixelSize", &pixel_idx, pixel_sizes, IM_ARRAYSIZE(pixel_sizes))) {
+                    RF::params.pixel_size = pixel_idx + 1;  // 转换为实际大小 (1-4)
+                    Config::SaveConfig();
+                }
                 
                 ImGui::Spacing();
                 
