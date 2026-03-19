@@ -138,18 +138,10 @@ namespace RF {
             // Original: 完全无修改，无黑边，无滤镜
             {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 0, 1.0f}},
             // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
-            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 0, 1.0f}},
-            // Spring 春季: 明亮轻盈
-            {"Spring", {true, 0.06f, 0.95f, 1.1f, 0.1f, 0.0f, false, false, 0.8f, 0.02f, false, 0.4f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 1, 1.0f}},
-            // Summer 夏季: 童话梦幻
-            {"Summer", {true, 0.04f, 1.08f, 1.3f, 0.05f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 2, 1.0f}},
-            // Autumn 金秋: 温暖丰收
-            {"Autumn", {true, 0.02f, 1.05f, 1.0f, 0.15f, 0.0f, false, false, 0.8f, 0.01f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 3, 1.0f}},
-            // Winter 冬季: 冰雪世界
-            {"Winter", {true, 0.03f, 0.98f, 0.85f, -0.15f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 4, 1.0f}}
+            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 0, 1.0f}}
         };
         
-        if (idx >= 0 && idx < 6) {
+        if (idx >= 0 && idx < 2) {
             params = presets[idx].p;
         }
     }
@@ -902,7 +894,7 @@ void main() {
 }
 )";
 
-// 夏季 (Summer) - 童话梦幻，鲜亮饱和
+// 夏季 (Summer) - 夏日阳光，明亮热烈
 const char* g_frag_summer = R"(
 precision highp float;
 varying vec2 vTexCoord;
@@ -917,36 +909,50 @@ void main() {
     vec4 color = texture2D(uTexture, vTexCoord);
     vec3 result = color.rgb;
     
-    // 高饱和度 - 童话般鲜艳
+    // 高饱和度 - 夏日鲜艳
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 1.35);
+    result = mix(vec3(gray), result, 1.25);
     
-    // 明亮通透
-    result = result * 1.06 + 0.02;
+    // 夏日阳光感 - 强烈的暖色光照
+    vec3 sunLight = vec3(1.08, 1.02, 0.92);
+    result *= sunLight;
     
-    // 童话色调 - 微妙的蓝紫梦幻感
-    vec3 fairyTint = vec3(0.97, 0.98, 1.02);
-    result *= fairyTint;
+    // 整体提亮 - 阳光充足
+    result = result * 1.1 + 0.05;
     
-    // 增强对比 - 但保持柔和
-    result = (result - 0.5) * 1.1 + 0.5;
+    // 强烈的阳光对比度
+    result = (result - 0.5) * 1.15 + 0.5;
     
-    // 梦幻光晕效果 - 柔和的高光散射
+    // 模拟夏日强烈的顶光效果 - 上亮下暗的层次感
+    float lum = dot(result, vec3(0.299, 0.587, 0.114));
+    
+    // 阳光光晕 - 高光区域扩散
     vec3 glow = vec3(0.0);
     for (int i = -2; i <= 2; i++) {
         for (int j = -2; j <= 2; j++) {
-            vec2 offset = vec2(float(i), float(j)) * uTexelSize * 1.5;
+            vec2 offset = vec2(float(i), float(j)) * uTexelSize * 2.0;
             glow += texture2D(uTexture, vTexCoord + offset).rgb;
         }
     }
     glow /= 25.0;
-    float lum = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(result, glow, lum * 0.15);
+    // 高光区域添加温暖的光晕
+    result = mix(result, glow * vec3(1.05, 0.98, 0.90), lum * 0.2);
     
-    // 轻微的闪烁光斑
-    float sparkle = random(vTexCoord * 100.0 + uTime * 0.5);
-    if (sparkle > 0.998 && lum > 0.6) {
-        result += vec3(0.08);
+    // 夏日强烈阳光 - 高光区域更亮更暖
+    if (lum > 0.65) {
+        vec3 sunHighlight = vec3(1.1, 1.0, 0.85);
+        result = mix(result, result * sunHighlight, (lum - 0.65) * 0.6);
+    }
+    
+    // 阳光穿透感 - 轻微的过曝效果
+    if (lum > 0.85) {
+        result = mix(result, vec3(1.0, 0.98, 0.92), (lum - 0.85) * 1.5);
+    }
+    
+    // 微妙的阳光闪烁
+    float sparkle = random(vTexCoord * 150.0 + uTime * 0.4);
+    if (sparkle > 0.996 && lum > 0.55) {
+        result += vec3(0.1, 0.08, 0.05);
     }
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
@@ -986,63 +992,73 @@ void main() {
     float sat = hsv.y;
     float val = hsv.z;
     
-    // 检测绿色区域 (hue: 0.15-0.45, 即绿色到青绿)
-    // 绿色范围: 0.22-0.45
-    bool isGreen = (hue > 0.12 && hue < 0.48);
+    // 扩大绿色检测范围：包括深绿 (hue: 0.05-0.52)
+    // 深绿/墨绿: 0.05-0.12
+    // 普通绿: 0.12-0.35
+    // 青绿: 0.35-0.52
+    bool isGreen = (hue > 0.05 && hue < 0.52) && sat > 0.1;
     
     if (isGreen) {
-        // 将绿色映射到橙黄色 (hue: 0.02-0.12)
-        // 黄绿(0.15-0.2) -> 黄(0.1-0.15)
-        // 纯绿(0.2-0.35) -> 橙黄(0.05-0.12)
-        // 青绿(0.35-0.45) -> 橙(0.02-0.08)
-        
         float targetHue;
-        if (hue < 0.2) {
+        float greenness = 0.0;
+        
+        // 深绿/墨绿区域 (0.05-0.15)
+        if (hue >= 0.05 && hue < 0.15) {
+            // 深绿 -> 深橙红/砖红
+            targetHue = mix(0.02, 0.06, (hue - 0.05) / 0.1);
+            greenness = smoothstep(0.0, 0.5, (hue - 0.05) / 0.1);
+        }
+        // 黄绿区域 (0.15-0.22)
+        else if (hue >= 0.15 && hue < 0.22) {
             // 黄绿 -> 金黄
-            targetHue = mix(0.12, 0.08, (hue - 0.12) / 0.08);
-        } else if (hue < 0.35) {
-            // 纯绿 -> 橙黄
-            targetHue = mix(0.08, 0.05, (hue - 0.2) / 0.15);
-        } else {
-            // 青绿 -> 深橙
-            targetHue = mix(0.05, 0.02, (hue - 0.35) / 0.13);
+            targetHue = mix(0.10, 0.12, (hue - 0.15) / 0.07);
+            greenness = 0.5 + 0.3 * (1.0 - abs(hue - 0.185) / 0.035);
+        }
+        // 纯绿区域 (0.22-0.35)
+        else if (hue >= 0.22 && hue < 0.35) {
+            // 纯绿 -> 明亮橙黄
+            targetHue = mix(0.06, 0.10, (hue - 0.22) / 0.13);
+            greenness = 0.7 + 0.2 * (1.0 - abs(hue - 0.285) / 0.065);
+        }
+        // 青绿区域 (0.35-0.52)
+        else {
+            // 青绿 -> 橙色
+            targetHue = mix(0.04, 0.06, (hue - 0.35) / 0.17);
+            greenness = smoothstep(0.0, 0.6, (0.52 - hue) / 0.17);
         }
         
-        // 增加饱和度 - 秋叶鲜艳
-        float newSat = sat * 1.1 + 0.1;
-        newSat = min(newSat, 1.0);
+        // 提亮秋色 - 明亮的金色而非暗色
+        float newSat = sat * 1.0 + 0.15; // 增加饱和度但不过度
+        newSat = min(newSat, 0.95);
         
-        // 轻微提亮
-        float newVal = val * 1.05 + 0.03;
+        // 提亮 - 金秋要明亮
+        float newVal = val * 1.2 + 0.12;
         newVal = min(newVal, 1.0);
         
-        // 平滑过渡
-        float greenness = 0.0;
-        if (hue > 0.15 && hue < 0.4) {
-            greenness = 1.0 - abs(hue - 0.275) / 0.125;
-            greenness = smoothstep(0.0, 0.7, greenness);
-        } else if (hue >= 0.4 && hue < 0.48) {
-            greenness = (0.48 - hue) / 0.08;
-        } else if (hue <= 0.15 && hue > 0.12) {
-            greenness = (hue - 0.12) / 0.03;
-        }
-        
         vec3 autumnColor = hsv2rgb(vec3(targetHue, newSat, newVal));
-        result = mix(result, autumnColor, greenness * 0.9);
+        result = mix(result, autumnColor, greenness * 0.92);
     }
     
-    // 整体暖色调调整 - 温暖的秋日阳光
-    vec3 warmTint = vec3(1.05, 0.98, 0.88);
+    // 整体暖色调 - 温暖明亮的秋日阳光
+    vec3 warmTint = vec3(1.08, 1.0, 0.90);
     result *= warmTint;
     
-    // 轻微增加对比度
-    result = (result - 0.5) * 1.08 + 0.5;
+    // 整体提亮
+    result = result * 1.08 + 0.04;
     
-    // 增加金黄高光
+    // 适中对比度
+    result = (result - 0.5) * 1.05 + 0.5;
+    
+    // 金黄高光 - 明亮
     float lum = dot(result, vec3(0.299, 0.587, 0.114));
-    if (lum > 0.7) {
-        vec3 goldHighlight = vec3(1.0, 0.92, 0.75);
-        result = mix(result, result * goldHighlight, (lum - 0.7) * 0.4);
+    if (lum > 0.6) {
+        vec3 goldHighlight = vec3(1.05, 0.95, 0.80);
+        result = mix(result, result * goldHighlight + 0.03, (lum - 0.6) * 0.5);
+    }
+    
+    // 高光区域更亮
+    if (lum > 0.8) {
+        result = mix(result, vec3(1.0, 0.95, 0.85), (lum - 0.8) * 0.5);
     }
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
@@ -1086,61 +1102,69 @@ void main() {
     float sat = hsv.y;
     float val = hsv.z;
     
-    // 检测绿色区域
-    bool isGreen = (hue > 0.12 && hue < 0.48);
+    // 扩大绿色检测范围：包括深绿 (hue: 0.05-0.52)
+    // 深绿/墨绿: 0.05-0.15
+    // 普通绿: 0.15-0.35
+    // 青绿: 0.35-0.52
+    bool isGreen = (hue > 0.05 && hue < 0.52) && sat > 0.08;
     
     if (isGreen) {
-        // 将绿色转换为冰雪白色/淡蓝色
-        // 降低饱和度，提高亮度
         float greenness = 0.0;
-        if (hue > 0.15 && hue < 0.4) {
-            greenness = 1.0 - abs(hue - 0.275) / 0.125;
-            greenness = smoothstep(0.0, 0.8, greenness);
-        } else if (hue >= 0.4 && hue < 0.48) {
-            greenness = (0.48 - hue) / 0.08;
-        } else if (hue <= 0.15 && hue > 0.12) {
-            greenness = (hue - 0.12) / 0.03;
+        
+        // 深绿/墨绿区域 (0.05-0.15)
+        if (hue >= 0.05 && hue < 0.15) {
+            greenness = smoothstep(0.0, 0.6, (hue - 0.05) / 0.1);
+        }
+        // 普通绿区域 (0.15-0.35)
+        else if (hue >= 0.15 && hue < 0.35) {
+            greenness = 0.6 + 0.35 * (1.0 - abs(hue - 0.25) / 0.1);
+        }
+        // 青绿区域 (0.35-0.52)
+        else {
+            greenness = smoothstep(0.0, 0.6, (0.52 - hue) / 0.17);
         }
         
-        // 冰雪白/淡蓝色调
-        // 低饱和度 + 偏蓝色调
-        float newSat = sat * 0.15; // 大幅降低饱和度
-        float newVal = val * 1.1 + 0.15; // 提亮
+        // 冰雪白 - 极低饱和度，高亮度
+        float newSat = sat * 0.05; // 极低饱和度，接近纯白
+        float newVal = val * 1.18 + 0.28; // 更大幅度提亮
         newVal = min(newVal, 1.0);
         
-        // 轻微偏蓝 (hue: 0.55-0.65 为蓝色)
-        float icyHue = 0.58 + random(vTexCoord) * 0.05; // 冰蓝色调
+        // 非常轻微的淡蓝偏移
+        float icyHue = 0.60 + random(vTexCoord) * 0.02;
         
         vec3 icyColor = hsv2rgb(vec3(icyHue, newSat, newVal));
-        result = mix(result, icyColor, greenness * 0.85);
+        result = mix(result, icyColor, greenness * 0.92);
     }
     
-    // 整体冷色调 - 冬日寒风
-    vec3 coldTint = vec3(0.92, 0.96, 1.05);
+    // 整体冷色调 - 浅蓝白调
+    vec3 coldTint = vec3(0.96, 0.98, 1.02);
     result *= coldTint;
     
-    // 降低整体饱和度 - 冰雪世界
+    // 更大幅度降低饱和度 - 雪白世界
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 0.85);
+    result = mix(vec3(gray), result, 0.6);
     
-    // 轻微提亮 - 雪地反光
-    result = result * 1.05 + 0.03;
+    // 更大幅度提亮 - 雪地明亮反光
+    result = result * 1.1 + 0.1;
     
     // 柔和对比度
-    result = (result - 0.5) * 0.95 + 0.5;
+    result = (result - 0.5) * 0.85 + 0.5;
     
-    // 冰霜高光 - 高光区域偏蓝白
+    // 冰霜高光 - 更白更亮
     float lum = dot(result, vec3(0.299, 0.587, 0.114));
-    if (lum > 0.75) {
-        vec3 frostHighlight = vec3(0.92, 0.96, 1.0);
-        result = mix(result, result * frostHighlight, (lum - 0.75) * 0.5);
+    if (lum > 0.6) {
+        vec3 frostHighlight = vec3(0.97, 0.99, 1.0);
+        result = mix(result, result * frostHighlight + 0.06, (lum - 0.6) * 0.6);
     }
     
     // 微妙的雪花闪烁效果
     float snowSparkle = random(vTexCoord * 200.0 + uTime * 0.3);
-    if (snowSparkle > 0.997 && lum > 0.5) {
-        result += vec3(0.06, 0.07, 0.08);
+    if (snowSparkle > 0.997 && lum > 0.35) {
+        result += vec3(0.12, 0.13, 0.14);
     }
+    
+    // 整体再提亮
+    result = result * 1.03 + 0.03;
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
@@ -1884,11 +1908,10 @@ static void DrawUI() {
     ImGui::TextColored(ImVec4(0.50f, 0.52f, 0.60f, 1.0f), "Presets");
     ImGui::Spacing();
     
-    const char* preset_names[] = {"Original", "Manga B&W", "Spring", "Summer", "Autumn", "Winter"};
+    const char* preset_names[] = {"Original", "Manga B&W"};
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
     
-    float btn_w = (ImGui::GetContentRegionAvail().x - 12) / 3.0f;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 2; i++) {
         bool selected = (RF::current_preset == i);
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.50f, 0.82f, 1.0f));
@@ -1896,13 +1919,13 @@ static void DrawUI() {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.16f, 0.20f, 1.0f));
         }
         
-        if (ImGui::Button(preset_names[i], ImVec2(btn_w, 32))) {
+        if (ImGui::Button(preset_names[i], ImVec2(ImGui::GetContentRegionAvail().x / 2 - 6, 36))) {
             RF::current_preset = i;
             RF::ApplyPreset(i);
             Config::SaveConfig();
         }
         ImGui::PopStyleColor();
-        if ((i + 1) % 3 != 0) ImGui::SameLine();
+        if (i == 0) ImGui::SameLine();
     }
     ImGui::PopStyleVar();
 
@@ -1951,24 +1974,6 @@ static void DrawUI() {
         if (ImGui::BeginTabItem("Stylize")) {
             ImGui::Spacing();
             
-            // Season (四季滤镜)
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season");
-            const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
-            ImGui::SetNextItemWidth(-10);
-            if (ImGui::Combo("##Season", &RF::params.season, seasons, IM_ARRAYSIZE(seasons))) {
-                if (RF::params.season > 0) RF::params.season_intensity = 1.0f;
-                Config::SaveConfig();
-            }
-            
-            if (RF::params.season > 0) {
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season Intensity");
-                if (ImGui::SliderFloat("##SeasonInt", &RF::params.season_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-            }
-            
-            ImGui::Separator();
-            ImGui::Spacing();
-            
             // Art Style
             ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Art Style");
             const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Color Pencil"};
@@ -2011,6 +2016,23 @@ static void DrawUI() {
 
         // Effects Tab
         if (ImGui::BeginTabItem("Effects")) {
+            ImGui::Spacing();
+            
+            // Season (四季滤镜)
+            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season");
+            const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
+            ImGui::SetNextItemWidth(-10);
+            if (ImGui::Combo("##Season", &RF::params.season, seasons, IM_ARRAYSIZE(seasons))) {
+                if (RF::params.season > 0) RF::params.season_intensity = 1.0f;
+                Config::SaveConfig();
+            }
+            
+            if (RF::params.season > 0) {
+                ImGui::SetNextItemWidth(-10);
+                if (ImGui::SliderFloat("##SeasonInt", &RF::params.season_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
+            }
+            
+            ImGui::Separator();
             ImGui::Spacing();
             
             // Sharpen
