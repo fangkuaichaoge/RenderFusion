@@ -82,6 +82,9 @@ namespace RF {
     GLuint prog_autumn = 0;      // 金秋
     GLuint prog_winter = 0;      // 冬季
 
+    // Pixel Art Shader
+    GLuint prog_pixel = 0;       // 像素画
+
     bool resources_ready = false;
     bool shaders_valid = false;
     int current_preset = 0;
@@ -124,6 +127,12 @@ namespace RF {
         bool enable_season_rotation = false;  // 启用四季自动轮换
         int season = 0;            // 0=Off, 1=Spring, 2=Summer, 3=Autumn, 4=Winter
         float season_intensity = 1.0f;
+        
+        // Pixel Art (像素画)
+        bool enable_pixel = false;
+        int pixel_size = 2;            // 像素大小: 1, 2, 3, 4
+        int pixel_palette = 2;         // 调色板: 1=GameBoy, 2=Sweetie16, 3=Endesga32
+        float pixel_intensity = 1.0f;
     };
     
     FilterParams params;
@@ -228,6 +237,11 @@ namespace Config {
         if (j.contains("enable_season_rotation")) RF::params.enable_season_rotation = j["enable_season_rotation"];
         if (j.contains("season")) RF::params.season = j["season"];
         if (j.contains("season_intensity")) RF::params.season_intensity = j["season_intensity"];
+        // Pixel Art
+        if (j.contains("enable_pixel")) RF::params.enable_pixel = j["enable_pixel"];
+        if (j.contains("pixel_size")) RF::params.pixel_size = j["pixel_size"];
+        if (j.contains("pixel_palette")) RF::params.pixel_palette = j["pixel_palette"];
+        if (j.contains("pixel_intensity")) RF::params.pixel_intensity = j["pixel_intensity"];
         
         LOGI("Configuration loaded successfully");
         return true;
@@ -263,6 +277,11 @@ namespace Config {
         j["enable_season_rotation"] = RF::params.enable_season_rotation;
         j["season"] = RF::params.season;
         j["season_intensity"] = RF::params.season_intensity;
+        // Pixel Art
+        j["enable_pixel"] = RF::params.enable_pixel;
+        j["pixel_size"] = RF::params.pixel_size;
+        j["pixel_palette"] = RF::params.pixel_palette;
+        j["pixel_intensity"] = RF::params.pixel_intensity;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -526,6 +545,181 @@ void main() {
     vec3 result = mix(color.rgb, rgbSplit, uIntensity);
     
     gl_FragColor = vec4(result, color.a);
+}
+)";
+
+// ==========================================
+// Pixel Art Shader - 像素画效果
+// ==========================================
+const char* g_frag_pixel = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uPixelSize;      // 像素大小 (1, 2, 3, 4)
+uniform int uPalette;          // 调色板: 0=Off, 1=GameBoy, 2=Sweetie16, 3=Endesga32
+uniform float uIntensity;
+
+// sRGB 转 Linear
+float srgbToLinear(float c) {
+    c = c / 255.0;
+    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
+// RGB 转 XYZ
+vec3 rgbToXyz(float r, float g, float b) {
+    float lr = srgbToLinear(r);
+    float lg = srgbToLinear(g);
+    float lb = srgbToLinear(b);
+    return vec3(
+        lr * 0.4124564 + lg * 0.3575761 + lb * 0.1804375,
+        lr * 0.2126729 + lg * 0.7151522 + lb * 0.0721750,
+        lr * 0.0193339 + lg * 0.1191920 + lb * 0.9503041
+    );
+}
+
+// XYZ 转 Lab
+vec3 xyzToLab(float x, float y, float z) {
+    float xn = 0.95047, yn = 1.0, zn = 1.08883;
+    float fx = x / xn > 0.008856 ? pow(x / xn, 1.0/3.0) : (7.787 * x / xn + 16.0/116.0);
+    float fy = y / yn > 0.008856 ? pow(y / yn, 1.0/3.0) : (7.787 * y / yn + 16.0/116.0);
+    float fz = z / zn > 0.008856 ? pow(z / zn, 1.0/3.0) : (7.787 * z / zn + 16.0/116.0);
+    return vec3(116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz));
+}
+
+// RGB 转 Lab
+vec3 rgbToLab(vec3 rgb) {
+    vec3 xyz = rgbToXyz(rgb.r * 255.0, rgb.g * 255.0, rgb.b * 255.0);
+    return xyzToLab(xyz.x, xyz.y, xyz.z);
+}
+
+// Lab 色差计算
+float labDistance(vec3 lab1, vec3 lab2) {
+    float dL = lab1.x - lab2.x;
+    float da = lab1.y - lab2.y;
+    float db = lab1.z - lab2.z;
+    return dL * dL * 1.2 + da * da + db * db;
+}
+
+// Game Boy 调色板 (4色)
+vec3 gameboyPalette[4] = vec3[](
+    vec3(15.0/255.0, 56.0/255.0, 15.0/255.0),   // 最深绿
+    vec3(48.0/255.0, 98.0/255.0, 48.0/255.0),   // 深绿
+    vec3(139.0/255.0, 172.0/255.0, 15.0/255.0), // 浅绿
+    vec3(155.0/255.0, 188.0/255.0, 15.0/255.0)  // 最浅绿
+);
+
+// Sweetie 16 调色板 (16色)
+vec3 sweetie16Palette[16] = vec3[](
+    vec3(26.0/255.0, 28.0/255.0, 44.0/255.0),   // 深蓝紫
+    vec3(51.0/255.0, 60.0/255.0, 87.0/255.0),   // 暗蓝灰
+    vec3(37.0/255.0, 113.0/255.0, 121.0/255.0), // 深青
+    vec3(41.0/255.0, 54.0/255.0, 111.0/255.0),  // 深蓝
+    vec3(93.0/255.0, 39.0/255.0, 93.0/255.0),   // 深紫
+    vec3(177.0/255.0, 62.0/255.0, 83.0/255.0),  // 深红
+    vec3(239.0/255.0, 125.0/255.0, 87.0/255.0), // 橙
+    vec3(255.0/255.0, 205.0/255.0, 117.0/255.0),// 黄
+    vec3(167.0/255.0, 240.0/255.0, 112.0/255.0),// 亮绿
+    vec3(56.0/255.0, 183.0/255.0, 100.0/255.0), // 绿
+    vec3(59.0/255.0, 93.0/255.0, 201.0/255.0),  // 蓝
+    vec3(65.0/255.0, 166.0/255.0, 246.0/255.0), // 亮蓝
+    vec3(115.0/255.0, 239.0/255.0, 247.0/255.0),// 青
+    vec3(148.0/255.0, 176.0/255.0, 194.0/255.0),// 浅灰
+    vec3(0.0/255.0, 0.0/255.0, 0.0/255.0),      // 黑
+    vec3(255.0/255.0, 255.0/255.0, 255.0/255.0) // 白
+);
+
+// Endesga 32 调色板 (32色)
+vec3 endesga32Palette[32] = vec3[](
+    vec3(0.0/255.0, 0.0/255.0, 0.0/255.0),         // 黑
+    vec3(63.0/255.0, 40.0/255.0, 50.0/255.0),      // 深红棕
+    vec3(84.0/255.0, 62.0/255.0, 44.0/255.0),      // 深棕
+    vec3(116.0/255.0, 63.0/255.0, 57.0/255.0),     // 棕红
+    vec3(184.0/255.0, 111.0/255.0, 80.0/255.0),    // 棕橙
+    vec3(190.0/255.0, 74.0/255.0, 47.0/255.0),     // 橙红
+    vec3(229.0/255.0, 59.0/255.0, 68.0/255.0),     // 亮红
+    vec3(158.0/255.0, 40.0/255.0, 53.0/255.0),     // 红
+    vec3(251.0/255.0, 146.0/255.0, 43.0/255.0),    // 亮橙
+    vec3(215.0/255.0, 118.0/255.0, 67.0/255.0),    // 橙
+    vec3(174.0/255.0, 118.0/255.0, 65.0/255.0),    // 棕
+    vec3(204.0/255.0, 127.0/255.0, 93.0/255.0),    // 肉色
+    vec3(228.0/255.0, 166.0/255.0, 114.0/255.0),   // 浅棕
+    vec3(232.0/255.0, 183.0/255.0, 150.0/255.0),   // 浅肉色
+    vec3(234.0/255.0, 212.0/255.0, 170.0/255.0),   // 米色
+    vec3(245.0/255.0, 221.0/255.0, 176.0/255.0),   // 浅米
+    vec3(255.0/255.0, 231.0/255.0, 98.0/255.0),    // 黄
+    vec3(99.0/255.0, 198.0/255.0, 77.0/255.0),     // 绿
+    vec3(50.0/255.0, 115.0/255.0, 69.0/255.0),     // 深绿
+    vec3(25.0/255.0, 61.0/255.0, 63.0/255.0),      // 深青
+    vec3(50.0/255.0, 60.0/255.0, 95.0/255.0),      // 深蓝
+    vec3(54.0/255.0, 63.0/255.0, 91.0/255.0),      // 暗蓝灰
+    vec3(82.0/255.0, 95.0/255.0, 140.0/255.0),     // 蓝紫
+    vec3(91.0/255.0, 123.0/255.0, 179.0/255.0),    // 蓝
+    vec3(108.0/255.0, 158.0/255.0, 216.0/255.0),   // 天蓝
+    vec3(132.0/255.0, 182.0/255.0, 235.0/255.0),   // 浅蓝
+    vec3(157.0/255.0, 200.0/255.0, 231.0/255.0),   // 淡蓝
+    vec3(169.0/255.0, 191.0/255.0, 227.0/255.0),   // 淡紫蓝
+    vec3(175.0/255.0, 191.0/255.0, 210.0/255.0),   // 浅灰蓝
+    vec3(195.0/255.0, 221.0/255.0, 232.0/255.0),   // 极淡蓝
+    vec3(88.0/255.0, 104.0/255.0, 132.0/255.0),    // 蓝灰
+    vec3(255.0/255.0, 255.0/255.0, 255.0/255.0)    // 白
+);
+
+// 在调色板中找最接近的颜色
+vec3 findBestColor(vec3 color, int palette) {
+    vec3 lab = rgbToLab(color);
+    vec3 bestColor = color;
+    float bestDist = 1e10;
+    
+    if (palette == 1) { // Game Boy
+        for (int i = 0; i < 4; i++) {
+            vec3 paletteLab = rgbToLab(gameboyPalette[i]);
+            float dist = labDistance(lab, paletteLab);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestColor = gameboyPalette[i];
+            }
+        }
+    } else if (palette == 2) { // Sweetie 16
+        for (int i = 0; i < 16; i++) {
+            vec3 paletteLab = rgbToLab(sweetie16Palette[i]);
+            float dist = labDistance(lab, paletteLab);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestColor = sweetie16Palette[i];
+            }
+        }
+    } else if (palette == 3) { // Endesga 32
+        for (int i = 0; i < 32; i++) {
+            vec3 paletteLab = rgbToLab(endesga32Palette[i]);
+            float dist = labDistance(lab, paletteLab);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestColor = endesga32Palette[i];
+            }
+        }
+    }
+    
+    return bestColor;
+}
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    
+    // 1. 像素化：将坐标对齐到像素网格
+    vec2 pixelGrid = uTexelSize * uPixelSize;
+    vec2 pixelCoord = floor(vTexCoord / pixelGrid) * pixelGrid + pixelGrid * 0.5;
+    
+    // 采样像素化后的颜色
+    vec3 pixelColor = texture2D(uTexture, pixelCoord).rgb;
+    
+    // 2. 颜色量化到调色板
+    vec3 result = pixelColor;
+    if (uPalette > 0) {
+        result = findBestColor(pixelColor, uPalette);
+    }
+    
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
@@ -1404,6 +1598,11 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_winter = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_winter));
     }
+    // Pixel Art shader
+    if (RF::prog_pixel == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_pixel = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_pixel));
+    }
 
     // Check if shaders are valid
     RF::shaders_valid = (RF::prog_base != 0);
@@ -1683,6 +1882,35 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_thresh);
         loc = glGetUniformLocation(RF::prog_outline, "uOpacity");
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dst_tex;
+        CHECK_GL_ERROR();
+    }
+
+    // Pass 7: Pixel Art (像素画效果)
+    if (RF::prog_pixel != 0 && RF::params.enable_pixel) {
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = use_fbo ? ((src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo) : 0;
+        GLuint dst_tex = use_fbo ? ((src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex) : RF::screen_tex;
+        if (src_tex == RF::screen_tex && use_fbo) { dst_fbo = RF::fbo; dst_tex = RF::fbo_tex; }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+        BindQuad(RF::prog_pixel);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_pixel, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_pixel, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_pixel, "uPixelSize");
+        SAFE_UNIFORM(loc, glUniform1f, (float)RF::params.pixel_size);
+        loc = glGetUniformLocation(RF::prog_pixel, "uPalette");
+        SAFE_UNIFORM(loc, glUniform1i, RF::params.pixel_palette);
+        loc = glGetUniformLocation(RF::prog_pixel, "uIntensity");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.pixel_intensity);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         final_tex = dst_tex;
@@ -2094,6 +2322,46 @@ static void DrawUI() {
                 if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
                 ImGui::SetNextItemWidth(-10);
                 if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
+            }
+            
+            ImGui::EndTabItem();
+        }
+
+        // Pixel Tab
+        if (ImGui::BeginTabItem("Pixel")) {
+            ImGui::Spacing();
+            
+            // Enable Pixel Art
+            if (ImGui::Checkbox("Enable Pixel Art", &RF::params.enable_pixel)) Config::SaveConfig();
+            
+            if (RF::params.enable_pixel) {
+                ImGui::Spacing();
+                
+                // Pixel Size
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Pixel Size");
+                const char* pixel_sizes[] = {"1px", "2px", "3px", "4px"};
+                ImGui::SetNextItemWidth(-10);
+                if (ImGui::Combo("##PixelSize", &RF::params.pixel_size, pixel_sizes, IM_ARRAYSIZE(pixel_sizes))) Config::SaveConfig();
+                
+                ImGui::Spacing();
+                
+                // Palette Selection
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Color Palette");
+                const char* palettes[] = {"Game Boy (4)", "Sweetie 16 (16)", "Endesga 32 (32)"};
+                ImGui::SetNextItemWidth(-10);
+                // palette index is 1-3, need to adjust for combo
+                int palette_idx = RF::params.pixel_palette - 1;
+                if (ImGui::Combo("##PixelPalette", &palette_idx, palettes, IM_ARRAYSIZE(palettes))) {
+                    RF::params.pixel_palette = palette_idx + 1;
+                    Config::SaveConfig();
+                }
+                
+                ImGui::Spacing();
+                
+                // Intensity
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Intensity");
+                ImGui::SetNextItemWidth(-10);
+                if (ImGui::SliderFloat("##PixelInt", &RF::params.pixel_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
