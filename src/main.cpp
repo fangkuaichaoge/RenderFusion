@@ -121,6 +121,7 @@ namespace RF {
         float tiktok_intensity = 1.0f;
         
         // Seasons (四季滤镜)
+        bool enable_season_rotation = false;  // 启用四季自动轮换
         int season = 0;            // 0=Off, 1=Spring, 2=Summer, 3=Autumn, 4=Winter
         float season_intensity = 1.0f;
     };
@@ -149,6 +150,25 @@ namespace RF {
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
         return params.enable_outline;
+    }
+
+    // 根据系统时间计算当前季节（四季轮换）
+    // 时间安排：从6点开始，每3小时一个季节，12小时一轮
+    // 6:00-9:00=春, 9:00-12:00=夏, 12:00-15:00=秋, 15:00-18:00=冬
+    // 18:00-21:00=春, 21:00-24:00=夏, 0:00-3:00=秋, 3:00-6:00=冬
+    int CalculateSeasonByTime() {
+        time_t now = time(nullptr);
+        struct tm* timeinfo = localtime(&now);
+        int hour = timeinfo->tm_hour;  // 0-23
+        
+        // 计算从6点开始经过的小时数（处理跨天情况）
+        int hours_from_6am = (hour - 6 + 24) % 24;
+        
+        // 每3小时一个季节：0=春, 1=夏, 2=秋, 3=冬
+        int season_index = (hours_from_6am / 3) % 4;
+        
+        // 返回季节值（1=春, 2=夏, 3=秋, 4=冬）
+        return season_index + 1;
     }
 }
 
@@ -205,6 +225,7 @@ namespace Config {
         if (j.contains("enable_tiktok")) RF::params.enable_tiktok = j["enable_tiktok"];
         if (j.contains("tiktok_offset")) RF::params.tiktok_offset = j["tiktok_offset"];
         if (j.contains("tiktok_intensity")) RF::params.tiktok_intensity = j["tiktok_intensity"];
+        if (j.contains("enable_season_rotation")) RF::params.enable_season_rotation = j["enable_season_rotation"];
         if (j.contains("season")) RF::params.season = j["season"];
         if (j.contains("season_intensity")) RF::params.season_intensity = j["season_intensity"];
         
@@ -239,6 +260,7 @@ namespace Config {
         j["enable_tiktok"] = RF::params.enable_tiktok;
         j["tiktok_offset"] = RF::params.tiktok_offset;
         j["tiktok_intensity"] = RF::params.tiktok_intensity;
+        j["enable_season_rotation"] = RF::params.enable_season_rotation;
         j["season"] = RF::params.season;
         j["season_intensity"] = RF::params.season_intensity;
         
@@ -1593,7 +1615,13 @@ void RenderFilters(int w, int h) {
     }
 
     // Pass: Season (四季滤镜)
-    if (use_fbo && RF::params.season > 0) {
+    // 如果启用了四季轮换，则根据系统时间自动计算季节
+    int current_season = RF::params.season;
+    if (RF::params.enable_season_rotation) {
+        current_season = RF::CalculateSeasonByTime();
+    }
+    
+    if (use_fbo && current_season > 0) {
         GLuint src_tex = final_tex;
         GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
         GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
@@ -1601,7 +1629,7 @@ void RenderFilters(int w, int h) {
         
         // 选择对应的季节shader
         GLuint prog = 0;
-        switch (RF::params.season) {
+        switch (current_season) {
             case 1: prog = RF::prog_spring; break;
             case 2: prog = RF::prog_summer; break;
             case 3: prog = RF::prog_autumn; break;
@@ -2018,6 +2046,23 @@ static void DrawUI() {
             
             // Season (四季滤镜)
             ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season");
+            
+            // 四季自动轮换开关
+            if (ImGui::Checkbox("Auto Season Rotation", &RF::params.enable_season_rotation)) {
+                if (RF::params.enable_season_rotation) {
+                    // 启用自动轮换时，根据当前时间设置季节
+                    RF::params.season = RF::CalculateSeasonByTime();
+                }
+                Config::SaveConfig();
+            }
+            
+            // 显示当前时间对应的季节（当启用自动轮换时）
+            if (RF::params.enable_season_rotation) {
+                int current_season = RF::CalculateSeasonByTime();
+                const char* season_names[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
+                ImGui::TextColored(ImVec4(0.40f, 0.75f, 0.40f, 1.0f), "Current: %s", season_names[current_season]);
+            }
+            
             const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
             ImGui::SetNextItemWidth(-10);
             if (ImGui::Combo("##Season", &RF::params.season, seasons, IM_ARRAYSIZE(seasons))) {
@@ -2025,7 +2070,7 @@ static void DrawUI() {
                 Config::SaveConfig();
             }
             
-            if (RF::params.season > 0) {
+            if (RF::params.season > 0 || RF::params.enable_season_rotation) {
                 ImGui::SetNextItemWidth(-10);
                 if (ImGui::SliderFloat("##SeasonInt", &RF::params.season_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
             }
