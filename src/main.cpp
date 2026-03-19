@@ -1121,43 +1121,47 @@ void main() {
             greenness = smoothstep(0.0, 0.6, (0.52 - hue) / 0.17);
         }
         
-        // 冰雪白 - 低饱和度，适中亮度
-        float newSat = sat * 0.08; // 低饱和度
-        float newVal = val * 1.08 + 0.15; // 适度提亮
-        newVal = min(newVal, 0.92); // 不要太白
+        // 冰雪蓝白色 - 低饱和度偏蓝色调
+        float newSat = sat * 0.2 + 0.15; // 保留一定饱和度让蓝色显现
+        float newVal = val * 1.08 + 0.12; // 适度提亮
+        newVal = min(newVal, 0.92);
         
-        // 轻微的淡蓝偏移
-        float icyHue = 0.60 + random(vTexCoord) * 0.02;
+        // 偏蓝色调 (hue: 0.58-0.65 为蓝色范围)
+        float icyHue = 0.60 + random(vTexCoord) * 0.03;
         
         vec3 icyColor = hsv2rgb(vec3(icyHue, newSat, newVal));
         result = mix(result, icyColor, greenness * 0.88);
     }
     
-    // 整体冷色调 - 淡蓝调
-    vec3 coldTint = vec3(0.94, 0.97, 1.02);
+    // 整体蓝白色调 - 偏蓝
+    vec3 coldTint = vec3(0.90, 0.95, 1.06);
     result *= coldTint;
     
-    // 降低饱和度 - 雪白世界
+    // 保持一定色彩 - 不要完全灰化
     float gray = dot(result, vec3(0.299, 0.587, 0.114));
-    result = mix(vec3(gray), result, 0.55);
+    result = mix(vec3(gray), result, 0.75);
+    
+    // 添加淡蓝色覆盖
+    vec3 icyOverlay = vec3(0.85, 0.92, 1.0);
+    result = mix(result, result * icyOverlay, 0.25);
     
     // 适度提亮
-    result = result * 1.04 + 0.05;
+    result = result * 1.03 + 0.04;
     
     // 柔和对比度
-    result = (result - 0.5) * 0.9 + 0.5;
+    result = (result - 0.5) * 0.92 + 0.5;
     
-    // 冰霜高光
+    // 冰霜高光 - 偏蓝白
     float lum = dot(result, vec3(0.299, 0.587, 0.114));
-    if (lum > 0.65) {
-        vec3 frostHighlight = vec3(0.96, 0.98, 1.0);
-        result = mix(result, result * frostHighlight + 0.03, (lum - 0.65) * 0.4);
+    if (lum > 0.6) {
+        vec3 frostHighlight = vec3(0.88, 0.94, 1.0);
+        result = mix(result, result * frostHighlight + 0.04, (lum - 0.6) * 0.35);
     }
     
-    // 微妙的雪花闪烁效果
+    // 微妙的雪花闪烁效果 - 偏蓝
     float snowSparkle = random(vTexCoord * 200.0 + uTime * 0.3);
     if (snowSparkle > 0.997 && lum > 0.4) {
-        result += vec3(0.08, 0.09, 0.1);
+        result += vec3(0.06, 0.08, 0.12);
     }
     
     gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
