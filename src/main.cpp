@@ -75,7 +75,12 @@ namespace RF {
         GLuint prog_anime = 0;       // 二次元平面
         GLuint prog_comic = 0;       // 美漫画
         GLuint prog_oil = 0;         // 油画
-        GLuint prog_parallax_3d = 0; // 3D视差凹凸
+
+    // Season Shaders
+    GLuint prog_spring = 0;      // 春季
+    GLuint prog_summer = 0;      // 夏季
+    GLuint prog_autumn = 0;      // 金秋
+    GLuint prog_winter = 0;      // 冬季
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -115,11 +120,9 @@ namespace RF {
         float tiktok_offset = 0.005f;  // RGB偏移量
         float tiktok_intensity = 1.0f;
         
-        // 3D Parallax Bump (Screen-Space)
-        bool enable_parallax_3d = false;   // 效果总开关
-        float parallax_depth = 0.05f;      // 凹凸深度 (0.03-0.08 最佳)
-        float parallax_scale = 0.12f;      // 视差强度 (0.1-0.15 最佳)
-        float parallax_rotation = 0.0f;    // 视差旋转角度
+        // Seasons (四季滤镜)
+        int season = 0;            // 0=Off, 1=Spring, 2=Summer, 3=Autumn, 4=Winter
+        float season_intensity = 1.0f;
     };
     
     FilterParams params;
@@ -133,19 +136,27 @@ namespace RF {
     void ApplyPreset(int idx) {
         Preset presets[] = {
             // Original: 完全无修改，无黑边，无滤镜
-            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f}},
+            {"Original", {false, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 0, 1.0f}},
             // Manga B&W: 黑白漫画风格（高对比度黑白 + 描边）
-            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f}}
+            {"Manga B&W", {true, 0.05f, 1.15f, 0.0f, 0.0f, 0.0f, true, false, 0.0f, 0.0f, false, 0.5f, true, 0.12f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 0, 1.0f}},
+            // Spring 春季: 明亮轻盈
+            {"Spring", {true, 0.06f, 0.95f, 1.1f, 0.1f, 0.0f, false, false, 0.8f, 0.02f, false, 0.4f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 1, 1.0f}},
+            // Summer 夏季: 童话梦幻
+            {"Summer", {true, 0.04f, 1.08f, 1.3f, 0.05f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 2, 1.0f}},
+            // Autumn 金秋: 温暖丰收
+            {"Autumn", {true, 0.02f, 1.05f, 1.0f, 0.15f, 0.0f, false, false, 0.8f, 0.01f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 3, 1.0f}},
+            // Winter 冬季: 冰雪世界
+            {"Winter", {true, 0.03f, 0.98f, 0.85f, -0.15f, 0.0f, false, false, 0.8f, 0.0f, false, 0.5f, false, 0.15f, 1.0f, 0, 1.0f, false, 0.005f, 1.0f, 4, 1.0f}}
         };
         
-        if (idx >= 0 && idx < 2) {
+        if (idx >= 0 && idx < 6) {
             params = presets[idx].p;
         }
     }
 
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
-        return params.enable_outline || params.enable_parallax_3d;
+        return params.enable_outline;
     }
 }
 
@@ -202,12 +213,8 @@ namespace Config {
         if (j.contains("enable_tiktok")) RF::params.enable_tiktok = j["enable_tiktok"];
         if (j.contains("tiktok_offset")) RF::params.tiktok_offset = j["tiktok_offset"];
         if (j.contains("tiktok_intensity")) RF::params.tiktok_intensity = j["tiktok_intensity"];
-        
-        // 3D Parallax Bump
-        if (j.contains("enable_parallax_3d")) RF::params.enable_parallax_3d = j["enable_parallax_3d"];
-        if (j.contains("parallax_depth")) RF::params.parallax_depth = j["parallax_depth"];
-        if (j.contains("parallax_scale")) RF::params.parallax_scale = j["parallax_scale"];
-        if (j.contains("parallax_rotation")) RF::params.parallax_rotation = j["parallax_rotation"];
+        if (j.contains("season")) RF::params.season = j["season"];
+        if (j.contains("season_intensity")) RF::params.season_intensity = j["season_intensity"];
         
         LOGI("Configuration loaded successfully");
         return true;
@@ -240,12 +247,8 @@ namespace Config {
         j["enable_tiktok"] = RF::params.enable_tiktok;
         j["tiktok_offset"] = RF::params.tiktok_offset;
         j["tiktok_intensity"] = RF::params.tiktok_intensity;
-        
-        // 3D Parallax Bump
-        j["enable_parallax_3d"] = RF::params.enable_parallax_3d;
-        j["parallax_depth"] = RF::params.parallax_depth;
-        j["parallax_scale"] = RF::params.parallax_scale;
-        j["parallax_rotation"] = RF::params.parallax_rotation;
+        j["season"] = RF::params.season;
+        j["season_intensity"] = RF::params.season_intensity;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -857,136 +860,289 @@ void main() {
 )";
 
 // ==========================================
-// 3D Relief/Bump Effect (Screen-Space)
-// 屏幕空间浮雕凸起效果
-// 
-// 核心原理：
-// 1. 高度图：图像亮度 → 高度值（亮凸暗凹）
-// 2. 法线计算：通过高度图梯度生成表面法线
-// 3. 光照计算：法线与光源点乘产生凹凸明暗
-// 4. UV偏移：沿梯度方向微调采样位置增强立体感
+// Season Shaders (四季滤镜)
 // ==========================================
-const char* g_frag_parallax_3d = R"(
+
+// 春季 (Spring) - 明亮轻盈，春日温暖感
+const char* g_frag_spring = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform float uIntensity;
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
+    
+    // 明亮轻盈 - 整体提亮
+    result = result * 1.08 + 0.04;
+    
+    // 春日温暖色调 - 轻微暖色
+    vec3 warmth = vec3(1.0, 0.98, 0.92);
+    result *= warmth;
+    
+    // 轻微提升饱和度 - 花朵般鲜艳
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 1.12);
+    
+    // 柔和对比度 - 轻盈不沉重
+    result = (result - 0.5) * 0.92 + 0.5;
+    
+    // 轻微的粉色花朵色调 - 高光区域
+    float lum = dot(result, vec3(0.299, 0.587, 0.114));
+    if (lum > 0.7) {
+        vec3 pinkTint = vec3(1.0, 0.95, 0.97);
+        result = mix(result, result * pinkTint, (lum - 0.7) * 0.5);
+    }
+    
+    // 柔和的高光
+    result = mix(result, vec3(1.0), max(0.0, lum - 0.85) * 0.3);
+    
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+}
+)";
+
+// 夏季 (Summer) - 童话梦幻，鲜亮饱和
+const char* g_frag_summer = R"(
 precision highp float;
 varying vec2 vTexCoord;
 uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
-uniform float uDepth;
-uniform float uScale;
-uniform float uRotation;
+uniform float uIntensity;
+uniform float uTime;
 
-// ========================================
-// 1. 高度图生成
-// ========================================
-float getHeight(vec2 uv) {
-    vec3 color = texture2D(uTexture, uv).rgb;
-    float h = dot(color, vec3(0.299, 0.587, 0.114));
-    // 增强对比度
-    h = smoothstep(0.2, 0.8, h);
-    return h;
-}
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
 
-// ========================================
-// 2. 计算高度图梯度（用于法线和偏移方向）
-// ========================================
-vec2 getHeightGradient(vec2 uv) {
-    float left   = getHeight(uv + vec2(-uTexelSize.x, 0.0));
-    float right  = getHeight(uv + vec2( uTexelSize.x, 0.0));
-    float top    = getHeight(uv + vec2(0.0, -uTexelSize.y));
-    float bottom = getHeight(uv + vec2(0.0,  uTexelSize.y));
-    
-    // 梯度向量（指向高度增加方向）
-    return vec2(right - left, bottom - top);
-}
-
-// ========================================
-// 3. 从梯度重建表面法线
-// ========================================
-vec3 getSurfaceNormal(vec2 uv) {
-    vec2 grad = getHeightGradient(uv);
-    // 法线 = (-grad.x, -grad.y, strength)
-    // strength 越大，凹凸越细腻
-    float strength = 1.0 / max(uScale, 0.001);
-    return normalize(vec3(-grad.x, -grad.y, strength));
-}
-
-// ========================================
-// 4. 简单视差UV偏移（基于高度和梯度）
-// ========================================
-vec2 getParallaxUV(vec2 uv, float height, vec2 gradient) {
-    // 沿梯度方向偏移，高度越高偏移越大
-    // 这会产生"亮处凸起"的视觉效果
-    vec2 offset = normalize(gradient + vec2(0.001)) * height * uScale;
-    return uv + offset;
-}
-
-// ========================================
-// 主函数
-// ========================================
 void main() {
-    vec2 uv = vTexCoord;
-    vec4 originalColor = texture2D(uTexture, uv);
+    vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
     
-    // 获取高度和梯度
-    float height = getHeight(uv);
-    vec2 gradient = getHeightGradient(uv);
+    // 高饱和度 - 童话般鲜艳
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 1.35);
     
-    // ========================================
-    // 效果1：UV偏移（浮雕效果）
-    // ========================================
-    vec2 offsetUV = uv;
+    // 明亮通透
+    result = result * 1.06 + 0.02;
     
-    // 应用旋转到偏移方向
-    float c = cos(uRotation);
-    float s = sin(uRotation);
-    vec2 rotatedGradient = vec2(
-        gradient.x * c - gradient.y * s,
-        gradient.x * s + gradient.y * c
-    );
+    // 童话色调 - 微妙的蓝紫梦幻感
+    vec3 fairyTint = vec3(0.97, 0.98, 1.02);
+    result *= fairyTint;
     
-    // 沿旋转后的梯度方向偏移
-    offsetUV += normalize(rotatedGradient + vec2(0.001)) * (height - 0.5) * uScale * uDepth;
+    // 增强对比 - 但保持柔和
+    result = (result - 0.5) * 1.1 + 0.5;
     
-    // 边界保护
-    offsetUV = clamp(offsetUV, uTexelSize * 2.0, vec2(1.0) - uTexelSize * 2.0);
+    // 梦幻光晕效果 - 柔和的高光散射
+    vec3 glow = vec3(0.0);
+    for (int i = -2; i <= 2; i++) {
+        for (int j = -2; j <= 2; j++) {
+            vec2 offset = vec2(float(i), float(j)) * uTexelSize * 1.5;
+            glow += texture2D(uTexture, vTexCoord + offset).rgb;
+        }
+    }
+    glow /= 25.0;
+    float lum = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(result, glow, lum * 0.15);
     
-    vec4 displacedColor = texture2D(uTexture, offsetUV);
+    // 轻微的闪烁光斑
+    float sparkle = random(vTexCoord * 100.0 + uTime * 0.5);
+    if (sparkle > 0.998 && lum > 0.6) {
+        result += vec3(0.08);
+    }
     
-    // ========================================
-    // 效果2：法线光照（凹凸明暗）
-    // ========================================
-    vec3 normal = getSurfaceNormal(uv);
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+}
+)";
+
+// 金秋 (Autumn) - 绿色→橙黄色，温暖丰收
+const char* g_frag_autumn = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform float uIntensity;
+
+// HSV 转换
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
     
-    // 光源方向（可旋转）
-    vec3 lightDir = normalize(vec3(
-        sin(uRotation) * 0.5,
-        cos(uRotation) * 0.5,
-        1.0
-    ));
+    // 转换到HSV进行色调映射
+    vec3 hsv = rgb2hsv(result);
+    float hue = hsv.x;
+    float sat = hsv.y;
+    float val = hsv.z;
     
-    // 漫反射光照
-    float diffuse = max(dot(normal, lightDir), 0.0);
-    diffuse = diffuse * 0.6 + 0.7; // 柔和化，避免过暗
+    // 检测绿色区域 (hue: 0.15-0.45, 即绿色到青绿)
+    // 绿色范围: 0.22-0.45
+    bool isGreen = (hue > 0.12 && hue < 0.48);
     
-    // ========================================
-    // 效果3：边缘增强（高通滤波）
-    // ========================================
-    float edge = length(gradient);
-    edge = smoothstep(0.01, 0.15, edge);
+    if (isGreen) {
+        // 将绿色映射到橙黄色 (hue: 0.02-0.12)
+        // 黄绿(0.15-0.2) -> 黄(0.1-0.15)
+        // 纯绿(0.2-0.35) -> 橙黄(0.05-0.12)
+        // 青绿(0.35-0.45) -> 橙(0.02-0.08)
+        
+        float targetHue;
+        if (hue < 0.2) {
+            // 黄绿 -> 金黄
+            targetHue = mix(0.12, 0.08, (hue - 0.12) / 0.08);
+        } else if (hue < 0.35) {
+            // 纯绿 -> 橙黄
+            targetHue = mix(0.08, 0.05, (hue - 0.2) / 0.15);
+        } else {
+            // 青绿 -> 深橙
+            targetHue = mix(0.05, 0.02, (hue - 0.35) / 0.13);
+        }
+        
+        // 增加饱和度 - 秋叶鲜艳
+        float newSat = sat * 1.1 + 0.1;
+        newSat = min(newSat, 1.0);
+        
+        // 轻微提亮
+        float newVal = val * 1.05 + 0.03;
+        newVal = min(newVal, 1.0);
+        
+        // 平滑过渡
+        float greenness = 0.0;
+        if (hue > 0.15 && hue < 0.4) {
+            greenness = 1.0 - abs(hue - 0.275) / 0.125;
+            greenness = smoothstep(0.0, 0.7, greenness);
+        } else if (hue >= 0.4 && hue < 0.48) {
+            greenness = (0.48 - hue) / 0.08;
+        } else if (hue <= 0.15 && hue > 0.12) {
+            greenness = (hue - 0.12) / 0.03;
+        }
+        
+        vec3 autumnColor = hsv2rgb(vec3(targetHue, newSat, newVal));
+        result = mix(result, autumnColor, greenness * 0.9);
+    }
     
-    // ========================================
-    // 最终合成
-    // ========================================
-    vec3 result = displacedColor.rgb * diffuse;
+    // 整体暖色调调整 - 温暖的秋日阳光
+    vec3 warmTint = vec3(1.05, 0.98, 0.88);
+    result *= warmTint;
     
-    // 轻微边缘高光
-    result += edge * 0.15 * vec3(1.0);
+    // 轻微增加对比度
+    result = (result - 0.5) * 1.08 + 0.5;
     
-    // 与原图混合
-    float intensity = uDepth * 2.0;
-    result = mix(originalColor.rgb, result, clamp(intensity, 0.0, 1.0));
+    // 增加金黄高光
+    float lum = dot(result, vec3(0.299, 0.587, 0.114));
+    if (lum > 0.7) {
+        vec3 goldHighlight = vec3(1.0, 0.92, 0.75);
+        result = mix(result, result * goldHighlight, (lum - 0.7) * 0.4);
+    }
     
-    gl_FragColor = vec4(result, originalColor.a);
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
+}
+)";
+
+// 冬季 (Winter) - 绿色→雪白/淡蓝，寒冷冰雪
+const char* g_frag_winter = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uIntensity;
+uniform float uTime;
+
+float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123); }
+
+// HSV 转换
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+    vec4 color = texture2D(uTexture, vTexCoord);
+    vec3 result = color.rgb;
+    
+    // 转换到HSV进行色调映射
+    vec3 hsv = rgb2hsv(result);
+    float hue = hsv.x;
+    float sat = hsv.y;
+    float val = hsv.z;
+    
+    // 检测绿色区域
+    bool isGreen = (hue > 0.12 && hue < 0.48);
+    
+    if (isGreen) {
+        // 将绿色转换为冰雪白色/淡蓝色
+        // 降低饱和度，提高亮度
+        float greenness = 0.0;
+        if (hue > 0.15 && hue < 0.4) {
+            greenness = 1.0 - abs(hue - 0.275) / 0.125;
+            greenness = smoothstep(0.0, 0.8, greenness);
+        } else if (hue >= 0.4 && hue < 0.48) {
+            greenness = (0.48 - hue) / 0.08;
+        } else if (hue <= 0.15 && hue > 0.12) {
+            greenness = (hue - 0.12) / 0.03;
+        }
+        
+        // 冰雪白/淡蓝色调
+        // 低饱和度 + 偏蓝色调
+        float newSat = sat * 0.15; // 大幅降低饱和度
+        float newVal = val * 1.1 + 0.15; // 提亮
+        newVal = min(newVal, 1.0);
+        
+        // 轻微偏蓝 (hue: 0.55-0.65 为蓝色)
+        float icyHue = 0.58 + random(vTexCoord) * 0.05; // 冰蓝色调
+        
+        vec3 icyColor = hsv2rgb(vec3(icyHue, newSat, newVal));
+        result = mix(result, icyColor, greenness * 0.85);
+    }
+    
+    // 整体冷色调 - 冬日寒风
+    vec3 coldTint = vec3(0.92, 0.96, 1.05);
+    result *= coldTint;
+    
+    // 降低整体饱和度 - 冰雪世界
+    float gray = dot(result, vec3(0.299, 0.587, 0.114));
+    result = mix(vec3(gray), result, 0.85);
+    
+    // 轻微提亮 - 雪地反光
+    result = result * 1.05 + 0.03;
+    
+    // 柔和对比度
+    result = (result - 0.5) * 0.95 + 0.5;
+    
+    // 冰霜高光 - 高光区域偏蓝白
+    float lum = dot(result, vec3(0.299, 0.587, 0.114));
+    if (lum > 0.75) {
+        vec3 frostHighlight = vec3(0.92, 0.96, 1.0);
+        result = mix(result, result * frostHighlight, (lum - 0.75) * 0.5);
+    }
+    
+    // 微妙的雪花闪烁效果
+    float snowSparkle = random(vTexCoord * 200.0 + uTime * 0.3);
+    if (snowSparkle > 0.997 && lum > 0.5) {
+        result += vec3(0.06, 0.07, 0.08);
+    }
+    
+    gl_FragColor = vec4(mix(color.rgb, result, uIntensity), color.a);
 }
 )";
 
@@ -1186,10 +1342,23 @@ void InitFilterResources(int w, int h) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_oil = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_oil));
     }
-    // 3D Parallax Bump shader
-    if (RF::prog_parallax_3d == 0) {
+    
+    // Season shaders
+    if (RF::prog_spring == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
-        RF::prog_parallax_3d = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_parallax_3d));
+        RF::prog_spring = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_spring));
+    }
+    if (RF::prog_summer == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_summer = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_summer));
+    }
+    if (RF::prog_autumn == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_autumn = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_autumn));
+    }
+    if (RF::prog_winter == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_winter = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_winter));
     }
 
     // Check if shaders are valid
@@ -1401,6 +1570,44 @@ void RenderFilters(int w, int h) {
         }
     }
 
+    // Pass: Season (四季滤镜)
+    if (use_fbo && RF::params.season > 0) {
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        if (src_tex == RF::screen_tex) { dst_fbo = RF::fbo; dst_tex = RF::fbo_tex; }
+        
+        // 选择对应的季节shader
+        GLuint prog = 0;
+        switch (RF::params.season) {
+            case 1: prog = RF::prog_spring; break;
+            case 2: prog = RF::prog_summer; break;
+            case 3: prog = RF::prog_autumn; break;
+            case 4: prog = RF::prog_winter; break;
+        }
+        
+        if (prog != 0) {
+            glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+            BindQuad(prog);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, src_tex);
+            
+            GLint loc;
+            loc = glGetUniformLocation(prog, "uTexture");
+            SAFE_UNIFORM(loc, glUniform1i, 0);
+            loc = glGetUniformLocation(prog, "uTexelSize");
+            SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+            loc = glGetUniformLocation(prog, "uIntensity");
+            SAFE_UNIFORM(loc, glUniform1f, RF::params.season_intensity);
+            loc = glGetUniformLocation(prog, "uTime");
+            SAFE_UNIFORM(loc, glUniform1f, g_Time);
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+            final_tex = dst_tex;
+            CHECK_GL_ERROR();
+        }
+    }
+
     // Pass 6: Outline (Moved before DOF to allow proper叠加)
     if (use_fbo && RF::prog_outline != 0 && RF::params.enable_outline) {
         // 读取 final_tex，写入到另一个 FBO（乒乓渲染）
@@ -1426,38 +1633,6 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_thresh);
         loc = glGetUniformLocation(RF::prog_outline, "uOpacity");
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-        final_tex = dst_tex;
-        CHECK_GL_ERROR();
-    }
-
-    // Pass 7: 3D Parallax Bump (Screen-Space Parallax Mapping)
-    if (use_fbo && RF::prog_parallax_3d != 0 && RF::params.enable_parallax_3d) {
-        GLuint src_tex = final_tex;
-        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
-        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
-        if (src_tex == RF::screen_tex) {
-            dst_fbo = RF::fbo;
-            dst_tex = RF::fbo_tex;
-        }
-
-        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
-        BindQuad(RF::prog_parallax_3d);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, src_tex);
-
-        GLint loc;
-        loc = glGetUniformLocation(RF::prog_parallax_3d, "uTexture");
-        SAFE_UNIFORM(loc, glUniform1i, 0);
-        loc = glGetUniformLocation(RF::prog_parallax_3d, "uTexelSize");
-        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
-        loc = glGetUniformLocation(RF::prog_parallax_3d, "uDepth");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.parallax_depth);
-        loc = glGetUniformLocation(RF::prog_parallax_3d, "uScale");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.parallax_scale);
-        loc = glGetUniformLocation(RF::prog_parallax_3d, "uRotation");
-        SAFE_UNIFORM(loc, glUniform1f, RF::params.parallax_rotation);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         final_tex = dst_tex;
@@ -1709,10 +1884,11 @@ static void DrawUI() {
     ImGui::TextColored(ImVec4(0.50f, 0.52f, 0.60f, 1.0f), "Presets");
     ImGui::Spacing();
     
-    const char* preset_names[] = {"Original", "Manga B&W"};
+    const char* preset_names[] = {"Original", "Manga B&W", "Spring", "Summer", "Autumn", "Winter"};
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
     
-    for (int i = 0; i < 2; i++) {
+    float btn_w = (ImGui::GetContentRegionAvail().x - 12) / 3.0f;
+    for (int i = 0; i < 6; i++) {
         bool selected = (RF::current_preset == i);
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.50f, 0.82f, 1.0f));
@@ -1720,13 +1896,13 @@ static void DrawUI() {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.16f, 0.20f, 1.0f));
         }
         
-        if (ImGui::Button(preset_names[i], ImVec2(ImGui::GetContentRegionAvail().x / 2 - 6, 36))) {
+        if (ImGui::Button(preset_names[i], ImVec2(btn_w, 32))) {
             RF::current_preset = i;
             RF::ApplyPreset(i);
             Config::SaveConfig();
         }
         ImGui::PopStyleColor();
-        if (i == 0) ImGui::SameLine();
+        if ((i + 1) % 3 != 0) ImGui::SameLine();
     }
     ImGui::PopStyleVar();
 
@@ -1773,6 +1949,24 @@ static void DrawUI() {
 
         // Stylize Tab
         if (ImGui::BeginTabItem("Stylize")) {
+            ImGui::Spacing();
+            
+            // Season (四季滤镜)
+            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season");
+            const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
+            ImGui::SetNextItemWidth(-10);
+            if (ImGui::Combo("##Season", &RF::params.season, seasons, IM_ARRAYSIZE(seasons))) {
+                if (RF::params.season > 0) RF::params.season_intensity = 1.0f;
+                Config::SaveConfig();
+            }
+            
+            if (RF::params.season > 0) {
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season Intensity");
+                if (ImGui::SliderFloat("##SeasonInt", &RF::params.season_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+            }
+            
+            ImGui::Separator();
             ImGui::Spacing();
             
             // Art Style
@@ -1835,22 +2029,6 @@ static void DrawUI() {
                 if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
                 ImGui::SetNextItemWidth(-10);
                 if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
-            }
-            
-            ImGui::Spacing();
-            
-            // 3D Parallax Bump
-            if (ImGui::Checkbox("3D Parallax Bump", &RF::params.enable_parallax_3d)) Config::SaveConfig();
-            if (RF::params.enable_parallax_3d) {
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Depth");
-                if (ImGui::SliderFloat("##ParallaxDepth", &RF::params.parallax_depth, 0.01f, 0.15f, "%.3f")) Config::SaveConfig();
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Scale");
-                if (ImGui::SliderFloat("##ParallaxScale", &RF::params.parallax_scale, 0.05f, 0.25f, "%.3f")) Config::SaveConfig();
-                ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Rotation");
-                if (ImGui::SliderFloat("##ParallaxRotation", &RF::params.parallax_rotation, -3.14159f, 3.14159f, "%.2f")) Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
