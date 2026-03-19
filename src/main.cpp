@@ -75,6 +75,7 @@ namespace RF {
         GLuint prog_anime = 0;       // 二次元平面
         GLuint prog_comic = 0;       // 美漫画
         GLuint prog_oil = 0;         // 油画
+        GLuint prog_parallax_3d = 0; // 3D视差凹凸
 
     bool resources_ready = false;
     bool shaders_valid = false;
@@ -113,6 +114,12 @@ namespace RF {
         bool enable_tiktok = false;
         float tiktok_offset = 0.005f;  // RGB偏移量
         float tiktok_intensity = 1.0f;
+        
+        // 3D Parallax Bump (Screen-Space)
+        bool enable_parallax_3d = false;   // 效果总开关
+        float parallax_depth = 0.05f;      // 凹凸深度 (0.03-0.08 最佳)
+        float parallax_scale = 0.12f;      // 视差强度 (0.1-0.15 最佳)
+        float parallax_rotation = 0.0f;    // 视差旋转角度
     };
     
     FilterParams params;
@@ -138,7 +145,7 @@ namespace RF {
 
     // Check if any multi-pass effect is enabled
     bool IsMultiPassEnabled() {
-        return params.enable_outline;
+        return params.enable_outline || params.enable_parallax_3d;
     }
 }
 
@@ -196,6 +203,12 @@ namespace Config {
         if (j.contains("tiktok_offset")) RF::params.tiktok_offset = j["tiktok_offset"];
         if (j.contains("tiktok_intensity")) RF::params.tiktok_intensity = j["tiktok_intensity"];
         
+        // 3D Parallax Bump
+        if (j.contains("enable_parallax_3d")) RF::params.enable_parallax_3d = j["enable_parallax_3d"];
+        if (j.contains("parallax_depth")) RF::params.parallax_depth = j["parallax_depth"];
+        if (j.contains("parallax_scale")) RF::params.parallax_scale = j["parallax_scale"];
+        if (j.contains("parallax_rotation")) RF::params.parallax_rotation = j["parallax_rotation"];
+        
         LOGI("Configuration loaded successfully");
         return true;
     }
@@ -227,6 +240,12 @@ namespace Config {
         j["enable_tiktok"] = RF::params.enable_tiktok;
         j["tiktok_offset"] = RF::params.tiktok_offset;
         j["tiktok_intensity"] = RF::params.tiktok_intensity;
+        
+        // 3D Parallax Bump
+        j["enable_parallax_3d"] = RF::params.enable_parallax_3d;
+        j["parallax_depth"] = RF::params.parallax_depth;
+        j["parallax_scale"] = RF::params.parallax_scale;
+        j["parallax_rotation"] = RF::params.parallax_rotation;
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -837,6 +856,123 @@ void main() {
 }
 )";
 
+// ==========================================
+// 3D Parallax Bump Shader (Screen-Space Parallax Mapping)
+// 无描边、无线条、原色保留，仅做 UV 偏移实现 3D 凹凸
+// ==========================================
+const char* g_frag_parallax_3d = R"(
+precision highp float;
+varying vec2 vTexCoord;
+uniform sampler2D uTexture;
+uniform vec2 uTexelSize;
+uniform float uDepth;
+uniform float uScale;
+uniform float uRotation;
+
+// 计算法线（基于屏幕空间微分）
+#define getNormal(pos) normalize(cross(dFdx(pos), dFdy(pos)))
+
+// TBN 矩阵构建（简化版，适配全屏后处理）
+highp mat3 tbnMatrix(highp vec3 normal) {
+    vec3 T = normal.yzx;
+    vec3 B = normal.xyz;
+    vec3 N = normal.zxy;
+    return mat3(T, B, N);
+}
+
+// 视差坐标转换
+highp vec3 GetParallaxCoord(highp vec3 normal, highp vec3 wp) {
+    if(normal.y > 0.5)
+        wp = wp;
+    if(normal.y < -0.5)
+        wp = vec3(-wp.x, -wp.y, wp.z);
+    if(normal.x > 0.5)
+        wp = vec3(wp.z, -wp.x, wp.y);
+    if(normal.x < -0.5)
+        wp = vec3(-wp.z, wp.x, wp.y);
+    if(normal.z > 0.5)
+        wp = vec3(-wp.x, -wp.z, wp.y);
+    if(normal.z < -0.5)
+        wp = vec3(wp.x, wp.z, wp.y);
+    return wp;
+}
+
+// 旋转矩阵
+highp mat3 rotationMatrix(highp float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat3(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0);
+}
+
+// 完整版 TBN 矩阵计算（基于微分推导切线空间）
+mat3 getTBN(vec2 uv, vec3 pos) {
+    vec2 dx_uv = dFdx(uv);
+    vec2 dy_uv = dFdy(uv);
+    vec3 dx_pos = dFdx(pos);
+    vec3 dy_pos = dFdy(pos);
+    
+    // 计算逆行列式，避免除零
+    float det = dx_uv.x * dy_uv.y - dx_uv.y * dx_uv.x;
+    if (abs(det) < 1e-6) {
+        return mat3(1.0);
+    }
+    float inv_det = 1.0 / det;
+    
+    // 计算切线 T、副切线 B
+    vec3 T = (dy_pos * dx_uv.x - dx_pos * dy_uv.x) * inv_det;
+    vec3 B = (dx_pos * dy_uv.y - dy_pos * dx_uv.y) * inv_det;
+    
+    // 计算法线 N（叉乘 T、B，正交化）
+    vec3 N = normalize(cross(T, B));
+    T = normalize(T);
+    B = normalize(B);
+    
+    return mat3(T, B, N);
+}
+
+// 高度图生成（基于原图亮度，灰度=高度）
+float getHeight(vec2 uv) {
+    vec3 color = texture2D(uTexture, uv).rgb;
+    // 标准亮度权重，生成灰度高度值
+    return dot(color, vec3(0.299, 0.587, 0.114));
+}
+
+// 视差 UV 偏移（核心：3D 凹凸位移，无颜色修改）
+vec2 parallaxUV(vec2 baseUV, vec3 viewDirTS, float scale) {
+    float height = getHeight(baseUV);
+    // 按高度+视线方向偏移 UV，仅做位移，不改变颜色
+    return baseUV + viewDirTS.xy * height * scale;
+}
+
+// 主函数
+void main() {
+    vec2 uv = vTexCoord;
+    
+    // 构建屏幕空间坐标（适配全屏后处理，范围[-1,1]）
+    vec3 screenPos = vec3(uv * 2.0 - 1.0, 0.0);
+    
+    // 视图方向（面向屏幕，Z轴负方向）
+    vec3 viewDirWS = vec3(0.0, 0.0, -1.0);
+    
+    // 计算 TBN 矩阵，转换视图方向到切线空间
+    mat3 TBN = getTBN(uv, screenPos);
+    vec3 viewDirTS = normalize(transpose(TBN) * viewDirWS);
+    
+    // 应用旋转
+    viewDirTS = rotationMatrix(uRotation) * viewDirTS;
+    
+    // 计算偏移后的 UV（真正的 3D 凹凸位移）
+    vec2 finalUV = parallaxUV(uv, viewDirTS, uScale);
+    
+    // 应用深度调整
+    float depth = getHeight(finalUV);
+    finalUV = mix(uv, finalUV, uDepth);
+    
+    // 仅采样，不修改任何颜色，保留原色
+    gl_FragColor = texture2D(uTexture, finalUV);
+}
+)";
+
 static float g_Time = 0.0f;
 
 // ==========================================
@@ -1032,6 +1168,11 @@ void InitFilterResources(int w, int h) {
     if (RF::prog_oil == 0) {
         GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
         RF::prog_oil = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_oil));
+    }
+    // 3D Parallax Bump shader
+    if (RF::prog_parallax_3d == 0) {
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, g_quad_vert);
+        RF::prog_parallax_3d = LinkProgram(vs, CompileShader(GL_FRAGMENT_SHADER, g_frag_parallax_3d));
     }
 
     // Check if shaders are valid
@@ -1268,6 +1409,38 @@ void RenderFilters(int w, int h) {
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_thresh);
         loc = glGetUniformLocation(RF::prog_outline, "uOpacity");
         SAFE_UNIFORM(loc, glUniform1f, RF::params.outline_opacity);
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        final_tex = dst_tex;
+        CHECK_GL_ERROR();
+    }
+
+    // Pass 7: 3D Parallax Bump (Screen-Space Parallax Mapping)
+    if (use_fbo && RF::prog_parallax_3d != 0 && RF::params.enable_parallax_3d) {
+        GLuint src_tex = final_tex;
+        GLuint dst_fbo = (src_tex == RF::fbo_tex) ? RF::fbo2 : RF::fbo;
+        GLuint dst_tex = (src_tex == RF::fbo_tex) ? RF::fbo_tex2 : RF::fbo_tex;
+        if (src_tex == RF::screen_tex) {
+            dst_fbo = RF::fbo;
+            dst_tex = RF::fbo_tex;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+        BindQuad(RF::prog_parallax_3d);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+
+        GLint loc;
+        loc = glGetUniformLocation(RF::prog_parallax_3d, "uTexture");
+        SAFE_UNIFORM(loc, glUniform1i, 0);
+        loc = glGetUniformLocation(RF::prog_parallax_3d, "uTexelSize");
+        SAFE_UNIFORM(loc, glUniform2f, 1.0f/w, 1.0f/h);
+        loc = glGetUniformLocation(RF::prog_parallax_3d, "uDepth");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.parallax_depth);
+        loc = glGetUniformLocation(RF::prog_parallax_3d, "uScale");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.parallax_scale);
+        loc = glGetUniformLocation(RF::prog_parallax_3d, "uRotation");
+        SAFE_UNIFORM(loc, glUniform1f, RF::params.parallax_rotation);
 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
         final_tex = dst_tex;
@@ -1645,6 +1818,22 @@ static void DrawUI() {
                 if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
                 ImGui::SetNextItemWidth(-10);
                 if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
+            }
+            
+            ImGui::Spacing();
+            
+            // 3D Parallax Bump
+            if (ImGui::Checkbox("3D Parallax Bump", &RF::params.enable_parallax_3d)) Config::SaveConfig();
+            if (RF::params.enable_parallax_3d) {
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Depth");
+                if (ImGui::SliderFloat("##ParallaxDepth", &RF::params.parallax_depth, 0.01f, 0.15f, "%.3f")) Config::SaveConfig();
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Scale");
+                if (ImGui::SliderFloat("##ParallaxScale", &RF::params.parallax_scale, 0.05f, 0.25f, "%.3f")) Config::SaveConfig();
+                ImGui::SetNextItemWidth(-10);
+                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Rotation");
+                if (ImGui::SliderFloat("##ParallaxRotation", &RF::params.parallax_rotation, -3.14159f, 3.14159f, "%.2f")) Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
