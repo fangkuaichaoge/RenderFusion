@@ -2494,8 +2494,7 @@ static void RegisterPreloaderInputCallback() {
     dlclose(lib);
 }
 // ===================== Input Hook =====================
-static void (*orig_Input1)(void* thiz, void* a1, void* a2) = nullptr;
-static int32_t (*orig_Input2)(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) = nullptr;
+// 注意：orig_Input1 和 orig_Input2 已经在前面定义过了，这里不要重复定义
 
 // 标记 ImGui 是否想要捕获当前事件（用于跨 hook 通信）
 static bool g_WantCaptureInput = false;
