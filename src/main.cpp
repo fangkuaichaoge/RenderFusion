@@ -1915,6 +1915,12 @@ static int g_Width = 0, g_Height = 0;
 static EGLContext g_TargetContext = EGL_NO_CONTEXT;
 static EGLSurface g_TargetSurface = EGL_NO_SURFACE;
 
+// 窗口位置/大小跟踪，用于触摸事件检测
+static ImVec2 g_WindowPos(0, 0);
+static ImVec2 g_WindowSize(420, 580);
+static ImVec2 g_TogglePos(15, 0);
+static float g_ToggleSize = 55.0f;
+
 struct GLState {
     GLint prog, tex, aTex, aBuf, eBuf, vao, fbo, vp[4], sc[4], bSrc, bDst, bSrcA, bDstA;
     GLboolean blend, cull, depth, scissor, stencil, dither;
@@ -2463,12 +2469,6 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 }
 
 // ===================== PreloaderInput Touch Callback =====================
-// 存储主窗口的位置和大小，用于检测点击是否在 UI 上
-static ImVec2 g_WindowPos(0, 0);
-static ImVec2 g_WindowSize(420, 580);
-static ImVec2 g_TogglePos(15, 0);  // 切换按钮位置
-static float g_ToggleSize = 55.0f; // 切换按钮大小
-
 // 检查点是否在窗口区域内
 static bool IsPointInWindow(float x, float y) {
     // 检查主窗口
