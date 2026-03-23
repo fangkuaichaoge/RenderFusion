@@ -2093,7 +2093,10 @@ static void DrawUI() {
     // Floating Toggle Button
     // ============================================
     if (!g_ShowUI) {
-        ImGui::SetNextWindowPos(ImVec2(15, io.DisplaySize.y * 0.5f), ImGuiCond_Always);
+        g_TogglePos = ImVec2(15, io.DisplaySize.y * 0.5f);
+        g_ToggleSize = 55.0f;
+        
+        ImGui::SetNextWindowPos(g_TogglePos, ImGuiCond_Always);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.75f, 0.95f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.55f, 0.85f, 1.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 30.0f);
@@ -2113,6 +2116,10 @@ static void DrawUI() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
+    
+    // 更新窗口位置和大小，用于触摸事件检测
+    g_WindowPos = ImGui::GetWindowPos();
+    g_WindowSize = ImGui::GetWindowSize();
 
     // ============================================
     // Presets Section
@@ -2456,18 +2463,24 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 }
 
 // ===================== PreloaderInput Touch Callback =====================
-// 检查点击位置是否在任何 ImGui 窗口上
-static bool IsPointOnImGuiWindow(float x, float y) {
-    ImGuiContext* ctx = ImGui::GetCurrentContext();
-    if (!ctx) return false;
-    
-    ImVec2 pos(x, y);
-    for (ImGuiWindow* window : ctx->Windows) {
-        if (window->Active && window->WasActive) {
-            ImRect rect(window->Pos, window->Pos + window->Size);
-            if (rect.Contains(pos)) {
-                return true;
-            }
+// 存储主窗口的位置和大小，用于检测点击是否在 UI 上
+static ImVec2 g_WindowPos(0, 0);
+static ImVec2 g_WindowSize(420, 580);
+static ImVec2 g_TogglePos(15, 0);  // 切换按钮位置
+static float g_ToggleSize = 55.0f; // 切换按钮大小
+
+// 检查点是否在窗口区域内
+static bool IsPointInWindow(float x, float y) {
+    // 检查主窗口
+    if (x >= g_WindowPos.x && x <= g_WindowPos.x + g_WindowSize.x &&
+        y >= g_WindowPos.y && y <= g_WindowPos.y + g_WindowSize.y) {
+        return true;
+    }
+    // 检查切换按钮（当 UI 隐藏时）
+    if (!g_ShowUI) {
+        if (x >= g_TogglePos.x && x <= g_TogglePos.x + g_ToggleSize &&
+            y >= g_TogglePos.y && y <= g_TogglePos.y + g_ToggleSize) {
+            return true;
         }
     }
     return false;
@@ -2475,9 +2488,6 @@ static bool IsPointOnImGuiWindow(float x, float y) {
 
 static bool OnTouchCallback(int action, int pointerId, float x, float y) {
     if (!g_Initialized) return false;
-    
-    // 如果 UI 隐藏，不拦截任何事件
-    if (!g_ShowUI) return false;
     
     ImGuiIO& io = ImGui::GetIO();
     
@@ -2489,8 +2499,12 @@ static bool OnTouchCallback(int action, int pointerId, float x, float y) {
         case AMOTION_EVENT_ACTION_DOWN:
         case AMOTION_EVENT_ACTION_POINTER_DOWN:
             io.AddMouseButtonEvent(0, true);
-            // 只有点击在 ImGui 窗口上时才拦截事件
-            if (IsPointOnImGuiWindow(x, y)) {
+            // 只有点击在 UI 窗口区域时才拦截事件
+            if (g_ShowUI && IsPointInWindow(x, y)) {
+                return true;
+            }
+            // 点击切换按钮时也拦截
+            if (!g_ShowUI && IsPointInWindow(x, y)) {
                 return true;
             }
             break;
@@ -2501,7 +2515,6 @@ static bool OnTouchCallback(int action, int pointerId, float x, float y) {
             break;
             
         case AMOTION_EVENT_ACTION_MOVE:
-            // MOVE 已在上面更新了位置
             // 拖拽时如果之前捕获了鼠标，继续拦截
             if (io.WantCaptureMouse) {
                 return true;
