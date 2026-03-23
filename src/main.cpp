@@ -1915,12 +1915,6 @@ static int g_Width = 0, g_Height = 0;
 static EGLContext g_TargetContext = EGL_NO_CONTEXT;
 static EGLSurface g_TargetSurface = EGL_NO_SURFACE;
 
-// 窗口位置/大小跟踪，用于触摸事件检测
-static ImVec2 g_WindowPos(0, 0);
-static ImVec2 g_WindowSize(420, 580);
-static ImVec2 g_TogglePos(15, 0);
-static float g_ToggleSize = 55.0f;
-
 struct GLState {
     GLint prog, tex, aTex, aBuf, eBuf, vao, fbo, vp[4], sc[4], bSrc, bDst, bSrcA, bDstA;
     GLboolean blend, cull, depth, scissor, stencil, dither;
@@ -2099,10 +2093,7 @@ static void DrawUI() {
     // Floating Toggle Button
     // ============================================
     if (!g_ShowUI) {
-        g_TogglePos = ImVec2(15, io.DisplaySize.y * 0.5f);
-        g_ToggleSize = 55.0f;
-        
-        ImGui::SetNextWindowPos(g_TogglePos, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(15, io.DisplaySize.y * 0.5f), ImGuiCond_Always);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.75f, 0.95f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.55f, 0.85f, 1.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 30.0f);
@@ -2122,10 +2113,6 @@ static void DrawUI() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
-    
-    // 更新窗口位置和大小，用于触摸事件检测
-    g_WindowPos = ImGui::GetWindowPos();
-    g_WindowSize = ImGui::GetWindowSize();
 
     // ============================================
     // Presets Section
@@ -2469,64 +2456,42 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 }
 
 // ===================== PreloaderInput Touch Callback =====================
-// 检查点是否在窗口区域内
-static bool IsPointInWindow(float x, float y) {
-    // 检查主窗口
-    if (x >= g_WindowPos.x && x <= g_WindowPos.x + g_WindowSize.x &&
-        y >= g_WindowPos.y && y <= g_WindowPos.y + g_WindowSize.y) {
-        return true;
-    }
-    // 检查切换按钮（当 UI 隐藏时）
-    if (!g_ShowUI) {
-        if (x >= g_TogglePos.x && x <= g_TogglePos.x + g_ToggleSize &&
-            y >= g_TogglePos.y && y <= g_TogglePos.y + g_ToggleSize) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool OnTouchCallback(int action, int pointerId, float x, float y) {
     if (!g_Initialized) return false;
     
     ImGuiIO& io = ImGui::GetIO();
-    
-    // 先更新鼠标位置
     io.AddMousePosEvent(x, y);
     
-    // 处理不同的触摸事件类型
-    switch (action) {
-        case AMOTION_EVENT_ACTION_DOWN:
-        case AMOTION_EVENT_ACTION_POINTER_DOWN:
-            io.AddMouseButtonEvent(0, true);
-            // 只有点击在 UI 窗口区域时才拦截事件
-            if (g_ShowUI && IsPointInWindow(x, y)) {
-                return true;
-            }
-            // 点击切换按钮时也拦截
-            if (!g_ShowUI && IsPointInWindow(x, y)) {
-                return true;
-            }
-            break;
-            
-        case AMOTION_EVENT_ACTION_UP:
-        case AMOTION_EVENT_ACTION_POINTER_UP:
-            io.AddMouseButtonEvent(0, false);
-            break;
-            
-        case AMOTION_EVENT_ACTION_MOVE:
-            // 拖拽时如果之前捕获了鼠标，继续拦截
-            if (io.WantCaptureMouse) {
-                return true;
-            }
-            break;
-            
-        case AMOTION_EVENT_ACTION_CANCEL:
-            io.AddMouseButtonEvent(0, false);
-            break;
+    if (action == AMOTION_EVENT_ACTION_DOWN) {
+        io.AddMouseButtonEvent(0, true);
+    } else if (action == AMOTION_EVENT_ACTION_UP) {
+        io.AddMouseButtonEvent(0, false);
     }
     
     return io.WantCaptureMouse;
+}
+
+static void RegisterPreloaderInputCallback() {
+    void* lib = dlopen("libPreloader.so", RTLD_NOW);
+    if (!lib) {
+        LOGI("libPreloader.so not found, skipping PreloaderInput");
+        return;
+    }
+    
+    GetPreloaderInput_Fn getPreloaderInput = (GetPreloaderInput_Fn)dlsym(lib, "GetPreloaderInput");
+    if (!getPreloaderInput) {
+        LOGI("GetPreloaderInput symbol not found");
+        dlclose(lib);
+        return;
+    }
+    
+    PreloaderInput_Interface* inputInterface = getPreloaderInput();
+    if (inputInterface && inputInterface->RegisterTouchCallback) {
+        inputInterface->RegisterTouchCallback(OnTouchCallback);
+        LOGI("PreloaderInput touch callback registered");
+    }
+    
+    dlclose(lib);
 }
 
 // ===================== Input Hook =====================
@@ -2543,23 +2508,6 @@ static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4,
 }
 
 static void HookInput() {
-    // 优先尝试 PreloaderInput
-    void* preloaderLib = dlopen("libpreloader.so", RTLD_NOW);
-    if (preloaderLib) {
-        auto GetInput = (GetPreloaderInput_Fn)dlsym(preloaderLib, "GetPreloaderInput");
-        if (GetInput) {
-            PreloaderInput_Interface* input = GetInput();
-            if (input && input->RegisterTouchCallback) {
-                input->RegisterTouchCallback(OnTouchCallback);
-                LOGI("PreloaderInput touch callback registered");
-                return;
-            }
-        }
-        dlclose(preloaderLib);
-    }
-    
-    // 回退到 libinput Hook
-    LOGI("PreloaderInput not available, falling back to libinput hook");
     void* sym1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
         "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
     if (sym1) {
@@ -2581,6 +2529,9 @@ static void* MainThread(void*) {
     
     // Load configuration from file if it exists
     Config::LoadConfig();
+    
+    // Register PreloaderInput touch callback
+    RegisterPreloaderInputCallback();
     
     GHandle egl = GlossOpen("libEGL.so");
     if (egl) {
