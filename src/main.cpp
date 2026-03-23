@@ -41,6 +41,15 @@
 
 #define SAFE_UNIFORM(loc, func, ...) if(loc >= 0) { func(loc, __VA_ARGS__); CHECK_GL_ERROR(); }
 
+// ===================== PreloaderInput Touch Callback =====================
+typedef bool (*PreloaderInput_OnTouch_Fn)(int action, int pointerId, float x, float y);
+
+struct PreloaderInput_Interface {
+    void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback);
+};
+
+typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
+
 // ==========================================
 // 1. Filter State & Params (ALL OFF BY DEFAULT)
 // ==========================================
@@ -2447,40 +2456,44 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 }
 
 // ===================== PreloaderInput Touch Callback =====================
-typedef bool (*PreloaderInput_OnTouch_Fn)(int action, int pointerId, float x, float y);
-
-struct PreloaderInput_Interface {
-    void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback);
-};
-
-typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
-
-// 移除所有未定义的全局变量依赖
-bool OnTouchCallback(int action, int pointerId, float x, float y)
-{
-    // 直接返回 true，简化逻辑
-    return true;
+static bool OnTouchCallback(int action, int pointerId, float x, float y) {
+    if (!g_Initialized) return false;
+    
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent(x, y);
+    
+    if (action == AMOTION_EVENT_ACTION_DOWN) {
+        io.AddMouseButtonEvent(0, true);
+    } else if (action == AMOTION_EVENT_ACTION_UP) {
+        io.AddMouseButtonEvent(0, false);
+    }
+    
+    return io.WantCaptureMouse;
 }
 
-void RegisterPreloaderInputCallback()
-{
-    void* preloaderLib = dlopen("libpreloader.so", RTLD_NOW);
-    if (!preloaderLib)
-        return;
-
-    GetPreloaderInput_Fn GetInput = reinterpret_cast<GetPreloaderInput_Fn>(dlsym(preloaderLib, "GetPreloaderInput"));
-    if (dlerror())
-    {
-        dlclose(preloaderLib);
+static void RegisterPreloaderInputCallback() {
+    void* lib = dlopen("libPreloader.so", RTLD_NOW);
+    if (!lib) {
+        LOGI("libPreloader.so not found, skipping PreloaderInput");
         return;
     }
-
-    PreloaderInput_Interface* input = GetInput();
-    if (input && input->RegisterTouchCallback)
-        input->RegisterTouchCallback(OnTouchCallback);
-
-    dlclose(preloaderLib);
+    
+    GetPreloaderInput_Fn getPreloaderInput = (GetPreloaderInput_Fn)dlsym(lib, "GetPreloaderInput");
+    if (!getPreloaderInput) {
+        LOGI("GetPreloaderInput symbol not found");
+        dlclose(lib);
+        return;
+    }
+    
+    PreloaderInput_Interface* inputInterface = getPreloaderInput();
+    if (inputInterface && inputInterface->RegisterTouchCallback) {
+        inputInterface->RegisterTouchCallback(OnTouchCallback);
+        LOGI("PreloaderInput touch callback registered");
+    }
+    
+    dlclose(lib);
 }
+
 // ===================== Input Hook =====================
 static void hook_Input1(void* thiz, void* a1, void* a2) {
     if (orig_Input1) orig_Input1(thiz, a1, a2);
@@ -2518,7 +2531,7 @@ static void* MainThread(void*) {
     Config::LoadConfig();
     
     // Register PreloaderInput touch callback
-   RegisterPreloaderTouchCallback();
+    RegisterPreloaderInputCallback();
     
     GHandle egl = GlossOpen("libEGL.so");
     if (egl) {
