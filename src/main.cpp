@@ -2472,9 +2472,9 @@ static bool OnTouchCallback(int action, int pointerId, float x, float y) {
 }
 
 static void RegisterPreloaderInputCallback() {
-    void* lib = dlopen("libPreloader.so", RTLD_NOW);
+    void* lib = dlopen("libpreloader.so", RTLD_NOW);
     if (!lib) {
-        LOGI("libPreloader.so not found, skipping PreloaderInput");
+        LOGI("libpreloader.so not found, skipping PreloaderInput");
         return;
     }
     
