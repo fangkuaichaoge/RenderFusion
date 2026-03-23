@@ -2540,7 +2540,7 @@ static void* MainThread(void*) {
     Config::LoadConfig();
     
     // Register PreloaderInput touch callback
-    RegisterPreloaderInputCallback();
+   RegisterPreloaderTouchCallback();
     
     GHandle egl = GlossOpen("libEGL.so");
     if (egl) {
