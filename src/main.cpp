@@ -2457,6 +2457,7 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 
 // ===================== PreloaderInput Touch Callback =====================
 typedef bool (*PreloaderInput_OnTouch_Fn)(int action, int pointerId, float x, float y);
+
 struct PreloaderInput_Interface { void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback); };
 typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
 
@@ -2492,7 +2493,7 @@ void RegisterPreloaderTouchCallback()
         return;
 
     GetPreloaderInput_Fn GetInput = reinterpret_cast<GetPreloaderInput_Fn>(dlsym(preloaderLib, "GetPreloaderInput"));
-    if (dlerror() != nullptr)
+    if (dlerror())
     {
         dlclose(preloaderLib);
         return;
