@@ -41,15 +41,6 @@
 
 #define SAFE_UNIFORM(loc, func, ...) if(loc >= 0) { func(loc, __VA_ARGS__); CHECK_GL_ERROR(); }
 
-// ===================== PreloaderInput Touch Callback =====================
-typedef bool (*PreloaderInput_OnTouch_Fn)(int action, int pointerId, float x, float y);
-
-struct PreloaderInput_Interface {
-    void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback);
-};
-
-typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
-
 // ==========================================
 // 1. Filter State & Params (ALL OFF BY DEFAULT)
 // ==========================================
@@ -2456,15 +2447,21 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 }
 
 // ===================== PreloaderInput Touch Callback =====================
+// 类型定义（仅保留一份，无重复）
 typedef bool (*PreloaderInput_OnTouch_Fn)(int action, int pointerId, float x, float y);
 
-struct PreloaderInput_Interface { void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback); };
+struct PreloaderInput_Interface {
+    void (*RegisterTouchCallback)(PreloaderInput_OnTouch_Fn callback);
+};
+
 typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
 
+// 外部依赖声明（根据你的项目保留）
 extern bool g_initialized;
 extern std::mutex g_boundsMutex;
 struct MenuBounds { bool visible; float x, y, w, h; } extern g_menuBounds;
 
+// 触控回调函数
 bool OnTouchCallback(int action, int pointerId, float x, float y)
 {
     if (!g_initialized)
@@ -2486,6 +2483,7 @@ bool OnTouchCallback(int action, int pointerId, float x, float y)
     return hitTest || io.WantCaptureMouse;
 }
 
+// 动态库加载与回调注册核心函数
 void RegisterPreloaderTouchCallback()
 {
     void* preloaderLib = dlopen("libpreloader.so", RTLD_NOW);
