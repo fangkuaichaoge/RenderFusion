@@ -2494,38 +2494,42 @@ static void RegisterPreloaderInputCallback() {
     dlclose(lib);
 }
 // ===================== Input Hook =====================
-// 内部独立标记：避免同一事件被重复交给ImGui处理，与Preloader完全解耦
-static bool g_InputEventProcessed = false;
+static void (*orig_Input1)(void* thiz, void* a1, void* a2) = nullptr;
+static int32_t (*orig_Input2)(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) = nullptr;
+
+// 标记 ImGui 是否想要捕获当前事件（用于跨 hook 通信）
+static bool g_WantCaptureInput = false;
 
 static void hook_Input1(void* thiz, void* a1, void* a2) {
-    // 先调用原函数完成事件初始化，保证系统原输入流程完整不被破坏
+    // 重置标记
+    g_WantCaptureInput = false;
+    
+    // 先调用原函数，让事件初始化
     if (orig_Input1) orig_Input1(thiz, a1, a2);
     
-    // 仅当事件有效、ImGui初始化完成时，交给ImGui处理
+    // 让 ImGui 处理，检查是否需要捕获
     if (thiz && g_Initialized) {
-        ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
-        g_InputEventProcessed = true; // 标记事件已处理，避免后续重复处理
+        g_WantCaptureInput = ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
     }
 }
 
 static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
-    // 先调用原函数获取事件，保证系统原流程能正常拿到完整事件数据
+    // 先调用原函数获取事件
     int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
     
-    bool wantCapture = false;
-    // 仅当成功获取有效事件、ImGui初始化完成、事件未被处理过时，才交给ImGui处理
-    if (r == 0 && e && *e && g_Initialized && !g_InputEventProcessed) {
+    // 如果 hook_Input1 已经标记需要捕获，或者这里检测到 ImGui 需要捕获
+    bool wantCapture = g_WantCaptureInput;
+    if (!wantCapture && r == 0 && e && *e && g_Initialized) {
         wantCapture = ImGui_ImplAndroid_HandleInputEvent(*e);
     }
     
-    // 核心修复：ImGui需要捕获事件时，清空事件指针，让游戏无法获取本次触摸事件
-    // 彻底杜绝事件重复处理、点两次才能生效的问题，无版本兼容风险
-    if (wantCapture && e) {
-        *e = nullptr;
+    // 关键：ImGui 需要捕获时，清空事件指针，游戏就收不到这个事件了
+    if (wantCapture && e && *e) {
+        *e = nullptr;  // 游戏拿不到事件，就不会处理
     }
     
-    // 重置标记，为下一次事件处理做准备
-    g_InputEventProcessed = false;
+    // 重置标记
+    g_WantCaptureInput = false;
     
     return r;
 }
@@ -2534,13 +2538,15 @@ static void HookInput() {
     void* sym1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
         "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
     if (sym1) {
-        GlossHook(sym1, (void*)hook_Input1, (void**)&orig_Input1);
-        // 去掉原有的return，保证两个钩子都能正常挂载，兼容所有机型
+        GHook h = GlossHook(sym1, (void*)hook_Input1, (void**)&orig_Input1);
+        // 即使 hook_Input1 成功，也继续 hook_Input2，因为拦截主要靠 Input2
     }
+    
     void* sym2 = (void*)GlossSymbol(GlossOpen("libinput.so"),
         "_ZN7android13InputConsumer7consumeEPNS_26InputEventFactoryInterfaceEblPjPPNS_10InputEventE", nullptr);
     if (sym2) {
-        GlossHook(sym2, (void*)hook_Input2, (void**)&orig_Input2);
+        GHook h = GlossHook(sym2, (void*)hook_Input2, (void**)&orig_Input2);
+        if (h) return;
     }
 }
 
