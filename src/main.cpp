@@ -2493,17 +2493,41 @@ static void RegisterPreloaderInputCallback() {
     
     dlclose(lib);
 }
-
 // ===================== Input Hook =====================
 static void hook_Input1(void* thiz, void* a1, void* a2) {
+    // 先调用原函数完成事件初始化，保证系统原输入流程完整不被破坏
     if (orig_Input1) orig_Input1(thiz, a1, a2);
-    if (thiz && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
+    
+    bool wantCapture = false;
+    // 仅当事件有效、ImGui初始化完成时，才交给ImGui处理并获取捕获状态
+    if (thiz && g_Initialized) {
+        wantCapture = ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
+    }
+    
+    // 核心修复：ImGui需要捕获事件时，标记触摸事件为取消，让游戏忽略本次操作，彻底杜绝事件重复处理
+    if (wantCapture && thiz) {
+        AInputEvent* event = (AInputEvent*)thiz;
+        if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION) {
+            AMotionEvent_setAction(event, AMOTION_EVENT_ACTION_CANCEL);
+        }
+    }
 }
 
 static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
+    // 先调用原函数获取输入事件，保证系统原流程能正常拿到完整事件数据
     int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
-    if (r == 0 && e && *e && g_Initialized)
-        ImGui_ImplAndroid_HandleInputEvent(*e);
+    
+    bool wantCapture = false;
+    // 仅当成功获取有效事件、ImGui初始化完成时，才交给ImGui处理并获取捕获状态
+    if (r == 0 && e && *e && g_Initialized) {
+        wantCapture = ImGui_ImplAndroid_HandleInputEvent(*e);
+    }
+    
+    // 核心修复：ImGui需要捕获事件时，清空事件指针，让游戏无法获取本次触摸事件，完全避免冲突
+    if (wantCapture && e) {
+        *e = nullptr;
+    }
+    
     return r;
 }
 
