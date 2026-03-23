@@ -2456,91 +2456,103 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
 }
 
 // ===================== PreloaderInput Touch Callback =====================
+// 检查点击位置是否在任何 ImGui 窗口上
+static bool IsPointOnImGuiWindow(float x, float y) {
+    ImGuiContext* ctx = ImGui::GetCurrentContext();
+    if (!ctx) return false;
+    
+    ImVec2 pos(x, y);
+    for (ImGuiWindow* window : ctx->Windows) {
+        if (window->Active && window->WasActive) {
+            ImRect rect(window->Pos, window->Pos + window->Size);
+            if (rect.Contains(pos)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static bool OnTouchCallback(int action, int pointerId, float x, float y) {
     if (!g_Initialized) return false;
     
+    // 如果 UI 隐藏，不拦截任何事件
+    if (!g_ShowUI) return false;
+    
     ImGuiIO& io = ImGui::GetIO();
+    
+    // 先更新鼠标位置
     io.AddMousePosEvent(x, y);
     
-    if (action == AMOTION_EVENT_ACTION_DOWN) {
-        io.AddMouseButtonEvent(0, true);
-    } else if (action == AMOTION_EVENT_ACTION_UP) {
-        io.AddMouseButtonEvent(0, false);
+    // 处理不同的触摸事件类型
+    switch (action) {
+        case AMOTION_EVENT_ACTION_DOWN:
+        case AMOTION_EVENT_ACTION_POINTER_DOWN:
+            io.AddMouseButtonEvent(0, true);
+            // 只有点击在 ImGui 窗口上时才拦截事件
+            if (IsPointOnImGuiWindow(x, y)) {
+                return true;
+            }
+            break;
+            
+        case AMOTION_EVENT_ACTION_UP:
+        case AMOTION_EVENT_ACTION_POINTER_UP:
+            io.AddMouseButtonEvent(0, false);
+            break;
+            
+        case AMOTION_EVENT_ACTION_MOVE:
+            // MOVE 已在上面更新了位置
+            // 拖拽时如果之前捕获了鼠标，继续拦截
+            if (io.WantCaptureMouse) {
+                return true;
+            }
+            break;
+            
+        case AMOTION_EVENT_ACTION_CANCEL:
+            io.AddMouseButtonEvent(0, false);
+            break;
     }
     
     return io.WantCaptureMouse;
 }
 
-static void RegisterPreloaderInputCallback() {
-    void* lib = dlopen("libpreloader.so", RTLD_NOW);
-    if (!lib) {
-        LOGI("libpreloader.so not found, skipping PreloaderInput");
-        return;
-    }
-    
-    GetPreloaderInput_Fn getPreloaderInput = (GetPreloaderInput_Fn)dlsym(lib, "GetPreloaderInput");
-    if (!getPreloaderInput) {
-        LOGI("GetPreloaderInput symbol not found");
-        dlclose(lib);
-        return;
-    }
-    
-    PreloaderInput_Interface* inputInterface = getPreloaderInput();
-    if (inputInterface && inputInterface->RegisterTouchCallback) {
-        inputInterface->RegisterTouchCallback(OnTouchCallback);
-        LOGI("PreloaderInput touch callback registered");
-    }
-    
-    dlclose(lib);
-}
 // ===================== Input Hook =====================
-// 注意：orig_Input1 和 orig_Input2 已经在前面定义过了，这里不要重复定义
-
-// 标记 ImGui 是否想要捕获当前事件（用于跨 hook 通信）
-static bool g_WantCaptureInput = false;
-
 static void hook_Input1(void* thiz, void* a1, void* a2) {
-    // 重置标记
-    g_WantCaptureInput = false;
-    
-    // 先调用原函数，让事件初始化
     if (orig_Input1) orig_Input1(thiz, a1, a2);
-    
-    // 让 ImGui 处理，检查是否需要捕获
-    if (thiz && g_Initialized) {
-        g_WantCaptureInput = ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
-    }
+    if (thiz && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
 }
 
 static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
-    // 先调用原函数获取事件
     int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
-    
-    // 如果 hook_Input1 已经标记需要捕获，或者这里检测到 ImGui 需要捕获
-    bool wantCapture = g_WantCaptureInput;
-    if (!wantCapture && r == 0 && e && *e && g_Initialized) {
-        wantCapture = ImGui_ImplAndroid_HandleInputEvent(*e);
-    }
-    
-    // 关键：ImGui 需要捕获时，清空事件指针，游戏就收不到这个事件了
-    if (wantCapture && e && *e) {
-        *e = nullptr;  // 游戏拿不到事件，就不会处理
-    }
-    
-    // 重置标记
-    g_WantCaptureInput = false;
-    
+    if (r == 0 && e && *e && g_Initialized)
+        ImGui_ImplAndroid_HandleInputEvent(*e);
     return r;
 }
 
 static void HookInput() {
+    // 优先尝试 PreloaderInput
+    void* preloaderLib = dlopen("libpreloader.so", RTLD_NOW);
+    if (preloaderLib) {
+        auto GetInput = (GetPreloaderInput_Fn)dlsym(preloaderLib, "GetPreloaderInput");
+        if (GetInput) {
+            PreloaderInput_Interface* input = GetInput();
+            if (input && input->RegisterTouchCallback) {
+                input->RegisterTouchCallback(OnTouchCallback);
+                LOGI("PreloaderInput touch callback registered");
+                return;
+            }
+        }
+        dlclose(preloaderLib);
+    }
+    
+    // 回退到 libinput Hook
+    LOGI("PreloaderInput not available, falling back to libinput hook");
     void* sym1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
         "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
     if (sym1) {
         GHook h = GlossHook(sym1, (void*)hook_Input1, (void**)&orig_Input1);
-        // 即使 hook_Input1 成功，也继续 hook_Input2，因为拦截主要靠 Input2
+        if (h) return;
     }
-    
     void* sym2 = (void*)GlossSymbol(GlossOpen("libinput.so"),
         "_ZN7android13InputConsumer7consumeEPNS_26InputEventFactoryInterfaceEblPjPPNS_10InputEventE", nullptr);
     if (sym2) {
@@ -2556,9 +2568,6 @@ static void* MainThread(void*) {
     
     // Load configuration from file if it exists
     Config::LoadConfig();
-    
-    // Register PreloaderInput touch callback
-    RegisterPreloaderInputCallback();
     
     GHandle egl = GlossOpen("libEGL.so");
     if (egl) {
