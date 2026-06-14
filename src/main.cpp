@@ -2222,10 +2222,6 @@ static void SetupStyle() {
 
     s.AntiAliasedLines = true;
     s.AntiAliasedFill = true;
-    
-    // MD3 specific
-    s.WindowShadowSize = 0.0f;
-    s.WindowShadowOffsetDist = 0.0f;
 }
 
 // ==========================================
@@ -2236,7 +2232,6 @@ static void SetupStyle() {
 static bool DrawDynamicIsland(ImVec2 pos, bool* clicked) {
     ImGuiIO& io = ImGui::GetIO();
     
-    // Animation - smooth lerp
     float dt = io.DeltaTime;
     MD3Style::IslandWidth += (MD3Style::IslandTargetWidth - MD3Style::IslandWidth) * MD3Style::IslandAnimSpeed * dt;
     MD3Style::IslandHeight += (MD3Style::IslandTargetHeight - MD3Style::IslandHeight) * MD3Style::IslandAnimSpeed * dt;
@@ -2244,61 +2239,58 @@ static bool DrawDynamicIsland(ImVec2 pos, bool* clicked) {
     float width = MD3Style::IslandWidth;
     float height = MD3Style::IslandHeight;
     
-    // Calculate bounds
     ImVec2 min(pos.x - width * 0.5f, pos.y - height * 0.5f);
     ImVec2 max(pos.x + width * 0.5f, pos.y + height * 0.5f);
-    ImRect bb(min, max);
     
-    // Check hover
-    bool hovered = bb.Contains(io.MousePos);
+    bool hovered = (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y);
     bool active = hovered && io.MouseDown[0];
     
-    // Update hover time for glow effect
     if (hovered) {
         MD3Style::IslandHoverTime += dt;
     } else {
         MD3Style::IslandHoverTime = 0.0f;
     }
     
-    // Draw the island
     ImDrawList* draw_list = ImGui::GetForegroundDrawList();
     
-    // Shadow
-    draw_list->AddShadowRect(min, max, 8.0f, ImVec4(0.0f, 0.0f, 0.0f, 0.3f), ImDrawFlags_ShadowCutOutShapeBackground);
+    float rounding = height * 0.5f;
     
-    // Background with gradient effect
+    // Draw shadow
+    ImVec2 shadowOffset(0, 4);
+    ImVec2 shadowMin(min.x + shadowOffset.x - 4, min.y + shadowOffset.y - 4);
+    ImVec2 shadowMax(max.x + shadowOffset.x + 4, max.y + shadowOffset.y + 4);
+    ImU32 shadowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.2f));
+    draw_list->AddRectFilled(shadowMin, shadowMax, shadowColor, rounding + 2);
+    
+    // Background color
     ImU32 bgColor;
     if (active) {
         bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::PrimaryDark);
     } else if (hovered) {
         bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::PrimaryLight);
-        // Expand on hover
         MD3Style::IslandTargetWidth = 140.0f;
         MD3Style::IslandTargetHeight = 42.0f;
     } else {
         bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::Primary);
-        // Contract when not hovered
         MD3Style::IslandTargetWidth = 120.0f;
         MD3Style::IslandTargetHeight = 36.0f;
     }
     
-    // Draw rounded rectangle (capsule shape)
-    float rounding = height * 0.5f;
     draw_list->AddRectFilled(min, max, bgColor, rounding, ImDrawFlags_RoundCornersAll);
     
-    // Glow effect when hovered
+    // Glow effect
     if (hovered && MD3Style::IslandHoverTime > 0.1f) {
         float glowAlpha = 0.15f * sinf(MD3Style::IslandHoverTime * 3.0f);
         ImVec4 glowColor = ImVec4(MD3Style::PrimaryLight.x, MD3Style::PrimaryLight.y, MD3Style::PrimaryLight.z, glowAlpha);
-        draw_list->AddRect(min - ImVec2(2, 2), max + ImVec2(2, 2), ImGui::ColorConvertFloat4ToU32(glowColor), rounding + 2, ImDrawFlags_RoundCornersAll, 2.0f);
+        ImVec2 glowMin(min.x - 2, min.y - 2);
+        ImVec2 glowMax(max.x + 2, max.y + 2);
+        draw_list->AddRect(glowMin, glowMax, ImGui::ColorConvertFloat4ToU32(glowColor), rounding + 2, ImDrawFlags_RoundCornersAll, 2.0f);
     }
     
-    // Draw text/icon
     ImVec2 textSize = ImGui::CalcTextSize("RF");
     ImVec2 textPos(pos.x - textSize.x * 0.5f, pos.y - textSize.y * 0.5f);
     draw_list->AddText(textPos, ImGui::ColorConvertFloat4ToU32(MD3Style::OnPrimary), "RF");
     
-    // Handle click
     if (hovered && io.MouseClicked[0]) {
         *clicked = true;
         return true;
