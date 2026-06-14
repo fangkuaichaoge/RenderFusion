@@ -237,6 +237,7 @@ namespace MD3Style {
     inline float IslandTargetHeight = 36.0f;
     inline float IslandAnimSpeed = 8.0f;
     inline float IslandHoverTime = 0.0f;
+    inline float IslandClickTime = 0.0f;  // For distinguishing click from drag
     inline ImVec2 IslandPos = ImVec2(0.5f, 50.0f);  // Normalized x (0-1), absolute y
     inline bool IslandDragging = false;
     inline ImVec2 IslandDragOffset = ImVec2(0, 0);
@@ -2349,7 +2350,13 @@ static bool DrawDynamicIsland(bool* clicked) {
     
     bool hovered = (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y);
     
-    // Handle dragging
+    // Handle click FIRST (before dragging)
+    if (hovered && io.MouseClicked[0]) {
+        *clicked = true;
+        MD3Style::IslandClickTime = io.Time;
+    }
+    
+    // Handle dragging - only start if held for a short time
     if (MD3Style::IslandDragging) {
         if (io.MouseDown[0]) {
             // Update position while dragging
@@ -2360,13 +2367,18 @@ static bool DrawDynamicIsland(bool* clicked) {
             float normX = newCenterX / io.DisplaySize.x;
             MD3Style::IslandPos.x = normX < 0.15f ? 0.15f : (normX > 0.85f ? 0.85f : normX);
             MD3Style::IslandPos.y = newCenterY < 30.0f ? 30.0f : (newCenterY > io.DisplaySize.y * 0.5f ? io.DisplaySize.y * 0.5f : newCenterY);
+            Config::SaveConfig();
         } else {
             MD3Style::IslandDragging = false;
         }
-    } else if (hovered && io.MouseDown[0] && !MD3Style::IslandDragging) {
-        // Start dragging
-        MD3Style::IslandDragging = true;
-        MD3Style::IslandDragOffset = ImVec2(io.MousePos.x - centerX, io.MousePos.y - centerY);
+    } else if (hovered && io.MouseDown[0]) {
+        // Start dragging after a short delay to distinguish from click
+        if (MD3Style::IslandClickTime > 0.0f && (io.Time - MD3Style::IslandClickTime) > 0.15f) {
+            MD3Style::IslandDragging = true;
+            MD3Style::IslandDragOffset = ImVec2(io.MousePos.x - centerX, io.MousePos.y - centerY);
+        }
+    } else {
+        MD3Style::IslandClickTime = 0.0f;
     }
     
     if (hovered && !MD3Style::IslandDragging) {
@@ -2437,9 +2449,7 @@ static bool DrawDynamicIsland(bool* clicked) {
     ImU32 textColor = brightness > 0.5f ? ImGui::ColorConvertFloat4ToU32(ImVec4(0.1f, 0.1f, 0.1f, 1.0f)) : ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
     draw_list->AddText(textPos, textColor, "RF");
     
-    // Handle click (only if not dragging)
-    if (hovered && io.MouseClicked[0] && !MD3Style::IslandDragging) {
-        *clicked = true;
+    if (*clicked) {
         return true;
     }
     
@@ -2463,27 +2473,25 @@ static void DrawUI() {
     }
 
     // ============================================
-    // Main Window - Tab-Based Design with Rounded Style
+    // Main Window - Wide Horizontal Layout
     // ============================================
-    ImGui::SetNextWindowSize(ImVec2(440, 580), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(820, 420), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.85f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 12));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 14));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 20.0f);
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
 
     // ============================================
-    // Preset Buttons (Rounded Pills)
+    // Header Bar - Preset Buttons + Quick Actions
     // ============================================
-    float presetBtnWidth = (ImGui::GetContentRegionAvail().x - 8) / 2.0f;
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14, 8));
     
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 22.0f);  // Fully rounded
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16, 10));
-    
-    // Original Preset
+    // Preset Buttons (Left Side)
     ImGui::PushStyleColor(ImGuiCol_Button, RF::current_preset == 0 ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, RF::current_preset == 0 ? MD3Style::PrimaryLight : MD3Style::SurfaceContainerHighest);
-    if (ImGui::Button("Original", ImVec2(presetBtnWidth, 40))) {
+    if (ImGui::Button("Original", ImVec2(120, 34))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
         Config::SaveConfig();
@@ -2492,331 +2500,336 @@ static void DrawUI() {
     
     ImGui::SameLine();
     
-    // Manga Preset
     ImGui::PushStyleColor(ImGuiCol_Button, RF::current_preset == 1 ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, RF::current_preset == 1 ? MD3Style::PrimaryLight : MD3Style::SurfaceContainerHighest);
-    if (ImGui::Button("Manga B&W", ImVec2(presetBtnWidth, 40))) {
+    if (ImGui::Button("Manga B&W", ImVec2(120, 34))) {
         RF::current_preset = 1;
         RF::ApplyPreset(1);
         Config::SaveConfig();
     }
     ImGui::PopStyleColor(2);
     
+    // Spacer
+    ImGui::SameLine(0, ImGui::GetContentRegionAvail().x - 280);
+    
+    // Close Button (Right Side)
+    ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::SurfaceContainerHigh);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::Error);
+    if (ImGui::Button("×", ImVec2(34, 34))) {
+        g_ShowUI = false;
+    }
+    ImGui::PopStyleColor(2);
+    
     ImGui::PopStyleVar(2);
+    
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
     // ============================================
-    // Tab Bar (Rounded Tabs)
+    // Main Content - Two Column Layout
     // ============================================
-    ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 16.0f);
-    ImGui::PushStyleColor(ImGuiCol_Tab, MD3Style::SurfaceContainer);
-    ImGui::PushStyleColor(ImGuiCol_TabHovered, MD3Style::SurfaceContainerHigh);
-    ImGui::PushStyleColor(ImGuiCol_TabActive, MD3Style::Primary);
+    ImGui::BeginChild("##LeftPanel", ImVec2(380, 280), false, ImGuiWindowFlags_NoScrollbar);
     
-    if (ImGui::BeginTabBar("##Tabs", ImGuiTabBarFlags_None)) {
-        
-        // ============================================
-        // Adjust Tab
-        // ============================================
-        if (ImGui::BeginTabItem("Adjust")) {
-            ImGui::Spacing();
-            
-            // Master Toggle (Rounded)
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-            if (ImGui::Checkbox("Enable Master", &RF::params.enable_master)) {
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            
-            ImGui::Spacing();
-            
-            // Sliders
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-            
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Brightness");
-            if (ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f")) Config::SaveConfig();
-            
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Contrast");
-            if (ImGui::SliderFloat("##Contrast", &RF::params.contrast, 0.6f, 1.8f, "%.2f")) Config::SaveConfig();
-            
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Saturation");
-            if (ImGui::SliderFloat("##Saturation", &RF::params.saturation, 0.0f, 2.0f, "%.2f")) Config::SaveConfig();
-            
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Temperature");
-            if (ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f")) Config::SaveConfig();
-            
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Vignette");
-            if (ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-            
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Film Grain");
-            if (ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f")) Config::SaveConfig();
-            
-            ImGui::PopStyleVar(2);
-            ImGui::PopItemWidth();
-            ImGui::EndTabItem();
-        }
-
-        // ============================================
-        // Stylize Tab
-        // ============================================
-        if (ImGui::BeginTabItem("Stylize")) {
-            ImGui::Spacing();
-            
-            // Art Style (Rounded Combo)
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Art Style");
-            const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Color Pencil"};
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-            if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
-                if (RF::params.art_style > 0) RF::params.art_intensity = 1.0f;
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            
-            if (RF::params.art_style > 0) {
-                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Intensity");
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-            }
-            ImGui::PopItemWidth();
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            // Toggles (Rounded)
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-            if (ImGui::Checkbox("Manga B&W", &RF::params.enable_bw)) Config::SaveConfig();
-            if (ImGui::Checkbox("Vintage Sepia", &RF::params.enable_sepia)) Config::SaveConfig();
-            if (RF::params.enable_sepia) {
-                ImGui::PushItemWidth(-1);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-                ImGui::PopItemWidth();
-            }
-            if (ImGui::Checkbox("Black Outline", &RF::params.enable_outline)) Config::SaveConfig();
-            if (RF::params.enable_outline) {
-                ImGui::PushItemWidth(-1);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Threshold: %.2f")) Config::SaveConfig();
-                if (ImGui::SliderFloat("##OutlineOpacity", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-                ImGui::PopItemWidth();
-            }
-            ImGui::PopStyleVar();
-            ImGui::EndTabItem();
-        }
-
-        // ============================================
-        // Effects Tab
-        // ============================================
-        if (ImGui::BeginTabItem("Effects")) {
-            ImGui::Spacing();
-            
-            // Season (Rounded Combo)
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Season Filter");
-            const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-            if (ImGui::Combo("##Season", &RF::params.season, seasons, IM_ARRAYSIZE(seasons))) {
-                if (RF::params.season > 0) RF::params.season_intensity = 1.0f;
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            
-            if (RF::params.season > 0) {
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##SeasonInt", &RF::params.season_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-            }
-            ImGui::PopItemWidth();
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            // Effect Toggles (Rounded)
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-            if (ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen)) Config::SaveConfig();
-            if (RF::params.enable_sharpen) {
-                ImGui::PushItemWidth(-1);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "Intensity: %.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-                ImGui::PopItemWidth();
-            }
-            
-            if (ImGui::Checkbox("TikTok RGB Split", &RF::params.enable_tiktok)) Config::SaveConfig();
-            if (RF::params.enable_tiktok) {
-                ImGui::PushItemWidth(-1);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##TikTokOffset", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
-                if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-                ImGui::PopItemWidth();
-            }
-            
-            if (ImGui::Checkbox("Pixel Art", &RF::params.enable_pixel)) Config::SaveConfig();
-            if (RF::params.enable_pixel) {
-                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Pixel Size");
-                const char* pixel_sizes[] = {"1px", "2px", "3px", "4px"};
-                ImGui::PushItemWidth(-1);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-                int pixel_idx = RF::params.pixel_size - 1;
-                if (ImGui::Combo("##PixelSize", &pixel_idx, pixel_sizes, IM_ARRAYSIZE(pixel_sizes))) {
-                    RF::params.pixel_size = pixel_idx + 1;
-                    Config::SaveConfig();
-                }
-                ImGui::PopStyleVar();
-                
-                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Color Palette");
-                const char* palettes[] = {"Game Boy (4)", "Sweetie 16 (16)", "Endesga 32 (32)"};
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-                int palette_idx = RF::params.pixel_palette - 1;
-                if (ImGui::Combo("##PixelPalette", &palette_idx, palettes, IM_ARRAYSIZE(palettes))) {
-                    RF::params.pixel_palette = palette_idx + 1;
-                    Config::SaveConfig();
-                }
-                ImGui::PopStyleVar();
-                
-                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Intensity");
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 12.0f);
-                if (ImGui::SliderFloat("##PixelInt", &RF::params.pixel_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
-                ImGui::PopStyleVar(2);
-                ImGui::PopItemWidth();
-            }
-            ImGui::PopStyleVar();
-            ImGui::EndTabItem();
-        }
-
-        // ============================================
-        // Theme Tab
-        // ============================================
-        if (ImGui::BeginTabItem("Theme")) {
-            ImGui::Spacing();
-            
-            // Background Theme (Rounded Pills)
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Background Theme");
-            ImGui::Spacing();
-            
-            float themeBtnWidth = (ImGui::GetContentRegionAvail().x - 12) / 3.0f;
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 18.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 8));
-            
-            const char* bg_themes[] = {"Dark", "Light", "AMOLED"};
-            for (int i = 0; i < 3; i++) {
-                bool selected = (MD3Style::CurrentBackgroundTheme == i);
-                ImGui::PushStyleColor(ImGuiCol_Button, selected ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
-                if (ImGui::Button(bg_themes[i], ImVec2(themeBtnWidth, 32))) {
-                    MD3Style::ApplyBackgroundTheme(i);
-                    SetupStyle();
-                    Config::SaveConfig();
-                }
-                ImGui::PopStyleColor();
-                if (i < 2) ImGui::SameLine();
-            }
-            ImGui::PopStyleVar(2);
-            
-            ImGui::Spacing();
-            
-            // Custom Background Tint
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Custom Background Tint");
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-            if (ImGui::ColorEdit4("##BgTint", (float*)&MD3Style::CustomBgTint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
-                MD3Style::ApplyBackgroundTheme(MD3Style::CurrentBackgroundTheme);
-                SetupStyle();
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            ImGui::PopItemWidth();
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            // Accent Colors (Rounded Pills)
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Accent Color");
-            ImGui::Spacing();
-            
-            float colorBtnWidth = (ImGui::GetContentRegionAvail().x - 14) / 4.0f;
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14.0f);
-            
-            const char* color_names[] = {"Red", "Purple", "Blue", "Green", "Orange", "Pink", "Cyan", "Moon"};
-            for (int i = 0; i < 8; i++) {
-                bool selected = (MD3Style::CurrentScheme == i);
-                ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Schemes[i].primary);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::Schemes[i].primaryLight);
-                
-                if (selected) {
-                    ImGui::PushStyleColor(ImGuiCol_Border, MD3Style::OnSurface);
-                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
-                }
-                
-                if (ImGui::Button(color_names[i], ImVec2(colorBtnWidth, 28))) {
-                    MD3Style::ApplyScheme(i);
-                    SetupStyle();
-                    Config::SaveConfig();
-                }
-                
-                if (selected) {
-                    ImGui::PopStyleVar();
-                    ImGui::PopStyleColor();
-                }
-                ImGui::PopStyleColor(2);
-                
-                if ((i + 1) % 4 != 0) ImGui::SameLine();
-            }
-            ImGui::PopStyleVar();
-            
-            ImGui::Spacing();
-            
-            // Island Color
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Island Color");
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-            if (ImGui::ColorEdit4("##IslandColor", (float*)&MD3Style::IslandBgColor, ImGuiColorEditFlags_NoInputs)) {
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            ImGui::PopItemWidth();
-            
-            ImGui::EndTabItem();
-        }
-
-        ImGui::EndTabBar();
+    // ============================================
+    // Quick Adjustments Section
+    // ============================================
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Quick Adjustments");
+    ImGui::Spacing();
+    
+    // Master Toggle
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    if (ImGui::Checkbox("Enable Master", &RF::params.enable_master)) {
+        Config::SaveConfig();
     }
-    
-    ImGui::PopStyleColor(3);
     ImGui::PopStyleVar();
     
     ImGui::Spacing();
+    
+    // Compact Sliders (Horizontal Layout)
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 8.0f);
+    
+    // Row 1: Brightness & Contrast
+    ImGui::PushItemWidth(170);
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Brightness");
+    if (ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f")) Config::SaveConfig();
+    
+    ImGui::SameLine();
+    ImGui::PushItemWidth(170);
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Contrast");
+    if (ImGui::SliderFloat("##Contrast", &RF::params.contrast, 0.6f, 1.8f, "%.2f")) Config::SaveConfig();
+    ImGui::PopItemWidth();
+    
+    // Row 2: Saturation & Temperature
+    ImGui::PushItemWidth(170);
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Saturation");
+    if (ImGui::SliderFloat("##Saturation", &RF::params.saturation, 0.0f, 2.0f, "%.2f")) Config::SaveConfig();
+    
+    ImGui::SameLine();
+    ImGui::PushItemWidth(170);
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Temperature");
+    if (ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f")) Config::SaveConfig();
+    ImGui::PopItemWidth();
+    
+    // Row 3: Vignette & Film Grain
+    ImGui::PushItemWidth(170);
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Vignette");
+    if (ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+    
+    ImGui::SameLine();
+    ImGui::PushItemWidth(170);
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Grain");
+    if (ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f")) Config::SaveConfig();
+    ImGui::PopItemWidth();
+    
+    ImGui::PopStyleVar(2);
+    
+    ImGui::EndChild();
+    
+    ImGui::SameLine();
+    
+    // ============================================
+    // Right Panel - Effects & Style
+    // ============================================
+    ImGui::BeginChild("##RightPanel", ImVec2(380, 280), false, ImGuiWindowFlags_NoScrollbar);
+    
+    // Effects Toggle Grid
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Effects");
+    ImGui::Spacing();
+    
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 6));
+    
+    // First row of toggles
+    ImGui::PushItemWidth(170);
+    if (ImGui::Checkbox("Sharpen", &RF::params.enable_sharpen)) Config::SaveConfig();
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Sepia", &RF::params.enable_sepia)) Config::SaveConfig();
+    
+    // Second row of toggles
+    if (ImGui::Checkbox("B&W", &RF::params.enable_bw)) Config::SaveConfig();
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Outline", &RF::params.enable_outline)) Config::SaveConfig();
+    
+    // Third row of toggles
+    if (ImGui::Checkbox("RGB Split", &RF::params.enable_tiktok)) Config::SaveConfig();
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Pixel Art", &RF::params.enable_pixel)) Config::SaveConfig();
+    
+    // Fourth row - Season Filter
+    const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Season");
+    ImGui::PushItemWidth(170);
+    if (ImGui::Combo("##Season", &RF::params.season, seasons, IM_ARRAYSIZE(seasons))) {
+        if (RF::params.season > 0) RF::params.season_intensity = 1.0f;
+        Config::SaveConfig();
+    }
+    
+    ImGui::PopItemWidth();
+    ImGui::PopStyleVar(2);
+    
+    ImGui::Spacing();
+    
+    // ============================================
+    // Effect Detail Sliders
+    // ============================================
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 8.0f);
+    
+    // Sharpen intensity
+    if (RF::params.enable_sharpen) {
+        ImGui::TextColored(MD3Style::OnSurfaceVariant, "Sharpen Int");
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##SharpInt", &RF::params.sharpen_intensity, 0.0f, 1.5f, "%.2f")) Config::SaveConfig();
+        ImGui::PopItemWidth();
+    }
+    
+    // Sepia intensity
+    if (RF::params.enable_sepia) {
+        ImGui::TextColored(MD3Style::OnSurfaceVariant, "Sepia Int");
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##SepiaInt", &RF::params.sepia_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+        ImGui::PopItemWidth();
+    }
+    
+    // Outline settings
+    if (RF::params.enable_outline) {
+        ImGui::TextColored(MD3Style::OnSurfaceVariant, "Outline");
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Thresh: %.2f")) Config::SaveConfig();
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##OutlineOpac", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) Config::SaveConfig();
+        ImGui::PopItemWidth(2);
+    }
+    
+    // RGB Split settings
+    if (RF::params.enable_tiktok) {
+        ImGui::TextColored(MD3Style::OnSurfaceVariant, "RGB Split");
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##TikTokOff", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Int: %.2f")) Config::SaveConfig();
+        ImGui::PopItemWidth(2);
+    }
+    
+    // Season intensity
+    if (RF::params.season > 0) {
+        ImGui::TextColored(MD3Style::OnSurfaceVariant, "Season Int");
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##SeasonInt", &RF::params.season_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+        ImGui::PopItemWidth();
+    }
+    
+    // Pixel Art settings
+    if (RF::params.enable_pixel) {
+        ImGui::TextColored(MD3Style::OnSurfaceVariant, "Pixel");
+        ImGui::PushItemWidth(170);
+        const char* pixel_sizes[] = {"1px", "2px", "3px", "4px"};
+        int pixel_idx = RF::params.pixel_size - 1;
+        if (ImGui::Combo("##PixelSize", &pixel_idx, pixel_sizes, IM_ARRAYSIZE(pixel_sizes))) {
+            RF::params.pixel_size = pixel_idx + 1;
+            Config::SaveConfig();
+        }
+        ImGui::PushItemWidth(170);
+        const char* palettes[] = {"GB(4)", "S16(16)", "E32(32)"};
+        int palette_idx = RF::params.pixel_palette - 1;
+        if (ImGui::Combo("##PixelPalette", &palette_idx, palettes, IM_ARRAYSIZE(palettes))) {
+            RF::params.pixel_palette = palette_idx + 1;
+            Config::SaveConfig();
+        }
+        ImGui::PushItemWidth(170);
+        if (ImGui::SliderFloat("##PixelInt", &RF::params.pixel_intensity, 0.0f, 1.0f, "Int: %.2f")) Config::SaveConfig();
+        ImGui::PopItemWidth(3);
+    }
+    
+    ImGui::PopStyleVar(2);
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    
+    // Art Style Combo
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Art Style");
+    const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Color Pencil"};
+    ImGui::PushItemWidth(-1);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
+        if (RF::params.art_style > 0) RF::params.art_intensity = 1.0f;
+        Config::SaveConfig();
+    }
+    ImGui::PopStyleVar();
+    
+    if (RF::params.art_style > 0) {
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 8.0f);
+        if (ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "Intensity: %.2f")) Config::SaveConfig();
+        ImGui::PopStyleVar(2);
+    }
+    ImGui::PopItemWidth();
+    
+    ImGui::EndChild();
+    
+    ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
     
     // ============================================
-    // Bottom Buttons (Rounded Pills)
+    // Background Color Customization
     // ============================================
-    float btnWidth = (ImGui::GetContentRegionAvail().x - 10) / 2.0f;
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16, 10));
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Background Tint");
+    ImGui::PushItemWidth(-1);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    if (ImGui::ColorEdit4("##BgTint", (float*)&MD3Style::CustomBgTint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+        MD3Style::ApplyBackgroundTheme(MD3Style::CurrentBackgroundTheme);
+        SetupStyle();
+        Config::SaveConfig();
+    }
+    ImGui::PopStyleVar();
+    ImGui::PopItemWidth();
+    
+    ImGui::Spacing();
+    
+    // Island Color
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Island Color");
+    ImGui::PushItemWidth(-1);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    if (ImGui::ColorEdit4("##IslandColor", (float*)&MD3Style::IslandBgColor, ImGuiColorEditFlags_NoInputs)) {
+        Config::SaveConfig();
+    }
+    ImGui::PopStyleVar();
+    ImGui::PopItemWidth();
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    
+    // ============================================
+    // Bottom Bar - Theme & Actions
+    // ============================================
+    
+    // Theme Colors (Pill Buttons)
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Theme");
+    ImGui::SameLine();
+    
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 16.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 6));
+    
+    const char* themes[] = {"Dark", "Light", "AMOLED"};
+    for (int i = 0; i < 3; i++) {
+        bool selected = (MD3Style::CurrentBackgroundTheme == i);
+        ImGui::PushStyleColor(ImGuiCol_Button, selected ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
+        if (ImGui::Button(themes[i], ImVec2(80, 28))) {
+            MD3Style::ApplyBackgroundTheme(i);
+            SetupStyle();
+            Config::SaveConfig();
+        }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+    }
+    
+    // Accent Colors
+    ImGui::SameLine();
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Accent");
+    ImGui::SameLine();
+    
+    float colorBtnWidth = 40;
+    const char* color_names[] = {"R", "P", "B", "G", "O", "Pi", "C", "M"};
+    for (int i = 0; i < 8; i++) {
+        bool selected = (MD3Style::CurrentScheme == i);
+        ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Schemes[i].primary);
+        
+        if (selected) {
+            ImGui::PushStyleColor(ImGuiCol_Border, MD3Style::OnSurface);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+        }
+        
+        if (ImGui::Button(color_names[i], ImVec2(colorBtnWidth, 28))) {
+            MD3Style::ApplyScheme(i);
+            SetupStyle();
+            Config::SaveConfig();
+        }
+        
+        if (selected) {
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+        }
+        ImGui::PopStyleColor();
+        
+        if (i < 7) ImGui::SameLine(0, 4);
+    }
+    
+    ImGui::PopStyleVar(2);
+    
+    // Save & Reset Buttons (Right Side)
+    ImGui::SameLine(0, ImGui::GetContentRegionAvail().x - 200);
+    
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16, 8));
     
     ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Primary);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::PrimaryLight);
-    if (ImGui::Button("Save Config", ImVec2(btnWidth, 40))) {
+    if (ImGui::Button("Save", ImVec2(90, 30))) {
         Config::SaveConfig();
     }
     ImGui::PopStyleColor(2);
@@ -2825,7 +2838,7 @@ static void DrawUI() {
     
     ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::SurfaceContainerHigh);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::SurfaceContainerHighest);
-    if (ImGui::Button("Reset All", ImVec2(btnWidth, 40))) {
+    if (ImGui::Button("Reset", ImVec2(90, 30))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
         Config::SaveConfig();
