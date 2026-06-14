@@ -2332,9 +2332,10 @@ static bool DrawDynamicIsland(bool* clicked) {
             float newCenterX = io.MousePos.x - MD3Style::IslandDragOffset.x;
             float newCenterY = io.MousePos.y - MD3Style::IslandDragOffset.y;
             
-            // Clamp to screen bounds
-            MD3Style::IslandPos.x = ImClamp(newCenterX / io.DisplaySize.x, 0.15f, 0.85f);
-            MD3Style::IslandPos.y = ImClamp(newCenterY, 30.0f, io.DisplaySize.y * 0.5f);
+            // Clamp to screen bounds (manual clamp for older ImGui compatibility)
+            float normX = newCenterX / io.DisplaySize.x;
+            MD3Style::IslandPos.x = normX < 0.15f ? 0.15f : (normX > 0.85f ? 0.85f : normX);
+            MD3Style::IslandPos.y = newCenterY < 30.0f ? 30.0f : (newCenterY > io.DisplaySize.y * 0.5f ? io.DisplaySize.y * 0.5f : newCenterY);
         } else {
             MD3Style::IslandDragging = false;
         }
