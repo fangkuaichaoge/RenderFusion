@@ -181,6 +181,131 @@ namespace RF {
     }
 }
 
+// ===================== MD3 Style Configuration =====================
+namespace MD3Style {
+    // Primary Colors (Moonlight-inspired gold/yellow accent)
+    inline ImVec4 Primary(0.9725f, 1.0f, 0.4980f, 1.0f);           // Moonlight gold
+    inline ImVec4 PrimaryLight(1.0f, 1.0f, 0.7953f, 1.0f);         // Light gold
+    inline ImVec4 PrimaryDark(0.8784f, 0.9f, 0.3980f, 1.0f);       // Dark gold
+    
+    // Secondary Colors (Moonlight blue accent)
+    inline ImVec4 Secondary(0.4980f, 0.5137f, 1.0f, 1.0f);         // Moonlight blue
+    
+    // Surface Colors (Moonlight dark theme)
+    inline ImVec4 Surface(0.0925f, 0.1003f, 0.1159f, 1.0f);        // Dark surface
+    inline ImVec4 SurfaceVariant(0.1569f, 0.1686f, 0.1922f, 1.0f);  // Slightly lighter
+    inline ImVec4 SurfaceContainer(0.1121f, 0.1262f, 0.1545f, 1.0f);// Container background
+    inline ImVec4 SurfaceContainerHigh(0.1569f, 0.1686f, 0.1922f, 1.0f);
+    inline ImVec4 SurfaceContainerHighest(0.1822f, 0.1898f, 0.1974f, 1.0f);
+    
+    // Background Colors (Moonlight)
+    inline ImVec4 BackgroundDim(0.0784f, 0.0863f, 0.1020f, 1.0f);  // Main bg
+    
+    // Text Colors
+    inline ImVec4 OnPrimary(0.0784f, 0.0863f, 0.1020f, 1.0f);      // Dark text on gold
+    inline ImVec4 OnSurface(1.0f, 1.0f, 1.0f, 1.0f);               // White text
+    inline ImVec4 OnSurfaceVariant(0.2745f, 0.3176f, 0.4510f, 1.0f);// Dim text
+    inline ImVec4 Outline(0.1569f, 0.1686f, 0.1922f, 1.0f);        // Border
+    inline ImVec4 OutlineVariant(0.1293f, 0.1479f, 0.1931f, 1.0f); // Light border
+    
+    // Success Colors
+    inline ImVec4 Success(0.298f, 0.686f, 0.314f, 1.0f);
+    
+    // Dynamic Island Animation
+    inline float IslandWidth = 120.0f;
+    inline float IslandHeight = 36.0f;
+    inline float IslandTargetWidth = 120.0f;
+    inline float IslandTargetHeight = 36.0f;
+    inline float IslandAnimSpeed = 8.0f;
+    inline float IslandHoverTime = 0.0f;
+    
+    // Preset color schemes
+    enum ColorScheme {
+        SCHEME_MOONLIGHT = 0,
+        SCHEME_PURPLE,
+        SCHEME_BLUE,
+        SCHEME_GREEN,
+        SCHEME_ORANGE,
+        SCHEME_PINK,
+        SCHEME_CYAN,
+        SCHEME_RED,
+        SCHEME_CUSTOM
+    };
+    
+    inline int CurrentScheme = SCHEME_MOONLIGHT;
+    
+    // Color scheme definitions
+    struct ColorSchemeDef {
+        ImVec4 primary;
+        ImVec4 primaryLight;
+        ImVec4 primaryDark;
+        ImVec4 secondary;
+        const char* name;
+    };
+    
+    inline ColorSchemeDef Schemes[] = {
+        { ImVec4(0.9725f, 1.0f, 0.4980f, 1.0f), ImVec4(1.0f, 1.0f, 0.7953f, 1.0f), ImVec4(0.8784f, 0.9f, 0.3980f, 1.0f), ImVec4(0.4980f, 0.5137f, 1.0f, 1.0f), "Moonlight" },
+        { ImVec4(0.675f, 0.357f, 0.937f, 1.0f), ImVec4(0.824f, 0.576f, 1.0f, 1.0f), ImVec4(0.502f, 0.173f, 0.827f, 1.0f), ImVec4(0.035f, 0.718f, 0.718f, 1.0f), "Purple" },
+        { ImVec4(0.129f, 0.588f, 0.953f, 1.0f), ImVec4(0.420f, 0.757f, 0.988f, 1.0f), ImVec4(0.055f, 0.365f, 0.749f, 1.0f), ImVec4(0.035f, 0.718f, 0.718f, 1.0f), "Blue" },
+        { ImVec4(0.298f, 0.686f, 0.314f, 1.0f), ImVec4(0.545f, 0.835f, 0.553f, 1.0f), ImVec4(0.145f, 0.502f, 0.157f, 1.0f), ImVec4(0.035f, 0.718f, 0.718f, 1.0f), "Green" },
+        { ImVec4(0.988f, 0.612f, 0.157f, 1.0f), ImVec4(1.0f, 0.812f, 0.506f, 1.0f), ImVec4(0.878f, 0.451f, 0.0f, 1.0f), ImVec4(0.035f, 0.718f, 0.718f, 1.0f), "Orange" },
+        { ImVec4(0.914f, 0.318f, 0.533f, 1.0f), ImVec4(1.0f, 0.608f, 0.776f, 1.0f), ImVec4(0.776f, 0.157f, 0.369f, 1.0f), ImVec4(0.035f, 0.718f, 0.718f, 1.0f), "Pink" },
+        { ImVec4(0.0f, 0.737f, 0.831f, 1.0f), ImVec4(0.333f, 0.867f, 0.925f, 1.0f), ImVec4(0.0f, 0.537f, 0.612f, 1.0f), ImVec4(0.675f, 0.357f, 0.937f, 1.0f), "Cyan" },
+        { ImVec4(0.937f, 0.267f, 0.267f, 1.0f), ImVec4(1.0f, 0.576f, 0.576f, 1.0f), ImVec4(0.812f, 0.118f, 0.118f, 1.0f), ImVec4(0.035f, 0.718f, 0.718f, 1.0f), "Red" },
+        { ImVec4(0.9725f, 1.0f, 0.4980f, 1.0f), ImVec4(1.0f, 1.0f, 0.7953f, 1.0f), ImVec4(0.8784f, 0.9f, 0.3980f, 1.0f), ImVec4(0.4980f, 0.5137f, 1.0f, 1.0f), "Custom" }
+    };
+    
+    inline void ApplyScheme(int scheme) {
+        if (scheme >= 0 && scheme <= SCHEME_CUSTOM) {
+            CurrentScheme = scheme;
+            if (scheme != SCHEME_CUSTOM) {
+                Primary = Schemes[scheme].primary;
+                PrimaryLight = Schemes[scheme].primaryLight;
+                PrimaryDark = Schemes[scheme].primaryDark;
+                Secondary = Schemes[scheme].secondary;
+            }
+        }
+    }
+    
+    inline void SaveToConfig(nlohmann::json& j) {
+        j["md3_scheme"] = CurrentScheme;
+        j["md3_primary_r"] = Primary.x;
+        j["md3_primary_g"] = Primary.y;
+        j["md3_primary_b"] = Primary.z;
+        j["md3_primary_light_r"] = PrimaryLight.x;
+        j["md3_primary_light_g"] = PrimaryLight.y;
+        j["md3_primary_light_b"] = PrimaryLight.z;
+        j["md3_primary_dark_r"] = PrimaryDark.x;
+        j["md3_primary_dark_g"] = PrimaryDark.y;
+        j["md3_primary_dark_b"] = PrimaryDark.z;
+        j["md3_secondary_r"] = Secondary.x;
+        j["md3_secondary_g"] = Secondary.y;
+        j["md3_secondary_b"] = Secondary.z;
+    }
+    
+    inline void LoadFromConfig(const nlohmann::json& j) {
+        if (j.contains("md3_scheme")) {
+            CurrentScheme = j["md3_scheme"];
+            if (CurrentScheme == SCHEME_CUSTOM) {
+                if (j.contains("md3_primary_r")) Primary.x = j["md3_primary_r"];
+                if (j.contains("md3_primary_g")) Primary.y = j["md3_primary_g"];
+                if (j.contains("md3_primary_b")) Primary.z = j["md3_primary_b"];
+                if (j.contains("md3_primary_light_r")) PrimaryLight.x = j["md3_primary_light_r"];
+                if (j.contains("md3_primary_light_g")) PrimaryLight.y = j["md3_primary_light_g"];
+                if (j.contains("md3_primary_light_b")) PrimaryLight.z = j["md3_primary_light_b"];
+                if (j.contains("md3_primary_dark_r")) PrimaryDark.x = j["md3_primary_dark_r"];
+                if (j.contains("md3_primary_dark_g")) PrimaryDark.y = j["md3_primary_dark_g"];
+                if (j.contains("md3_primary_dark_b")) PrimaryDark.z = j["md3_primary_dark_b"];
+                if (j.contains("md3_secondary_r")) Secondary.x = j["md3_secondary_r"];
+                if (j.contains("md3_secondary_g")) Secondary.y = j["md3_secondary_g"];
+                if (j.contains("md3_secondary_b")) Secondary.z = j["md3_secondary_b"];
+            } else {
+                ApplyScheme(CurrentScheme);
+            }
+        }
+    }
+}
+
 // ===================== Configuration File Support =====================
 namespace Config {
     // Path for configuration file
@@ -243,6 +368,9 @@ namespace Config {
         if (j.contains("pixel_palette")) RF::params.pixel_palette = j["pixel_palette"];
         if (j.contains("pixel_intensity")) RF::params.pixel_intensity = j["pixel_intensity"];
         
+        // Load MD3 Style Configuration
+        MD3Style::LoadFromConfig(j);
+        
         LOGI("Configuration loaded successfully");
         return true;
     }
@@ -282,6 +410,9 @@ namespace Config {
         j["pixel_size"] = RF::params.pixel_size;
         j["pixel_palette"] = RF::params.pixel_palette;
         j["pixel_intensity"] = RF::params.pixel_intensity;
+        
+        // MD3 Style Configuration
+        MD3Style::SaveToConfig(j);
         
         std::ofstream file(CONFIG_PATH);
         if (!file.is_open()) {
@@ -1968,140 +2099,228 @@ static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    // 深色主题配色
-    ImVec4 bg_dark(0.08f, 0.08f, 0.10f, 0.95f);
-    ImVec4 bg_medium(0.12f, 0.12f, 0.15f, 1.0f);
-    ImVec4 bg_light(0.16f, 0.16f, 0.20f, 1.0f);
-    ImVec4 accent(0.25f, 0.55f, 0.85f, 1.0f);
-    ImVec4 accent_hover(0.30f, 0.62f, 0.92f, 1.0f);
-    ImVec4 text_main(0.95f, 0.95f, 0.98f, 1.0f);
-    ImVec4 text_dim(0.55f, 0.58f, 0.65f, 1.0f);
+    // MD3 Style - Material Design 3
+    // Window & Background
+    c[ImGuiCol_WindowBg] = MD3Style::BackgroundDim;
+    c[ImGuiCol_ChildBg] = MD3Style::SurfaceContainer;
+    c[ImGuiCol_PopupBg] = ImVec4(MD3Style::Surface.x, MD3Style::Surface.y, MD3Style::Surface.z, 0.98f);
 
-    // 窗口背景
-    c[ImGuiCol_WindowBg] = bg_dark;
-    c[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.10f, 0.12f, 1.0f);
-    c[ImGuiCol_PopupBg] = ImVec4(0.08f, 0.08f, 0.10f, 0.98f);
+    // Title Bar
+    c[ImGuiCol_TitleBg] = MD3Style::Surface;
+    c[ImGuiCol_TitleBgActive] = MD3Style::SurfaceContainerHigh;
+    c[ImGuiCol_TitleBgCollapsed] = ImVec4(MD3Style::Surface.x, MD3Style::Surface.y, MD3Style::Surface.z, 0.80f);
 
-    // 标题栏
-    c[ImGuiCol_TitleBg] = ImVec4(0.06f, 0.06f, 0.08f, 1.0f);
-    c[ImGuiCol_TitleBgActive] = ImVec4(0.08f, 0.08f, 0.12f, 1.0f);
-    c[ImGuiCol_TitleBgCollapsed] = ImVec4(0.04f, 0.04f, 0.06f, 0.80f);
+    // Frame Background
+    c[ImGuiCol_FrameBg] = MD3Style::SurfaceContainerHigh;
+    c[ImGuiCol_FrameBgHovered] = MD3Style::SurfaceContainerHighest;
+    c[ImGuiCol_FrameBgActive] = MD3Style::PrimaryDark;
 
-    // 帧背景
-    c[ImGuiCol_FrameBg] = bg_medium;
-    c[ImGuiCol_FrameBgHovered] = bg_light;
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.20f, 0.20f, 0.25f, 1.0f);
+    // Buttons - MD3 Filled Button Style
+    c[ImGuiCol_Button] = MD3Style::Primary;
+    c[ImGuiCol_ButtonHovered] = MD3Style::PrimaryLight;
+    c[ImGuiCol_ButtonActive] = MD3Style::PrimaryDark;
 
-    // 按钮
-    c[ImGuiCol_Button] = bg_light;
-    c[ImGuiCol_ButtonHovered] = accent_hover;
-    c[ImGuiCol_ButtonActive] = accent;
+    // Slider
+    c[ImGuiCol_SliderGrab] = MD3Style::Primary;
+    c[ImGuiCol_SliderGrabActive] = MD3Style::PrimaryLight;
 
-    // 滑块
-    c[ImGuiCol_SliderGrab] = accent;
-    c[ImGuiCol_SliderGrabActive] = accent_hover;
+    // Checkbox
+    c[ImGuiCol_CheckMark] = MD3Style::Primary;
 
-    // 复选框
-    c[ImGuiCol_CheckMark] = accent;
+    // Text
+    c[ImGuiCol_Text] = MD3Style::OnSurface;
+    c[ImGuiCol_TextDisabled] = MD3Style::OnSurfaceVariant;
+    c[ImGuiCol_TextSelectedBg] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.30f);
 
-    // 文字
-    c[ImGuiCol_Text] = text_main;
-    c[ImGuiCol_TextDisabled] = text_dim;
-    c[ImGuiCol_TextSelectedBg] = ImVec4(accent.x, accent.y, accent.z, 0.35f);
+    // Header (Collapsing headers, trees, etc.)
+    c[ImGuiCol_Header] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.15f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.25f);
+    c[ImGuiCol_HeaderActive] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.40f);
 
-    // 标题头
-    c[ImGuiCol_Header] = bg_light;
-    c[ImGuiCol_HeaderHovered] = ImVec4(accent.x, accent.y, accent.z, 0.30f);
-    c[ImGuiCol_HeaderActive] = ImVec4(accent.x, accent.y, accent.z, 0.50f);
+    // Tabs
+    c[ImGuiCol_Tab] = MD3Style::SurfaceContainerHigh;
+    c[ImGuiCol_TabHovered] = MD3Style::Primary;
+    c[ImGuiCol_TabActive] = MD3Style::PrimaryLight;
+    c[ImGuiCol_TabUnfocused] = MD3Style::SurfaceContainer;
+    c[ImGuiCol_TabUnfocusedActive] = MD3Style::SurfaceContainerHigh;
 
-    // 标签页
-    c[ImGuiCol_Tab] = bg_medium;
-    c[ImGuiCol_TabHovered] = accent_hover;
-    c[ImGuiCol_TabActive] = accent;
-    c[ImGuiCol_TabUnfocused] = bg_medium;
-    c[ImGuiCol_TabUnfocusedActive] = bg_light;
+    // Separator
+    c[ImGuiCol_Separator] = MD3Style::OutlineVariant;
+    c[ImGuiCol_SeparatorHovered] = MD3Style::Primary;
+    c[ImGuiCol_SeparatorActive] = MD3Style::PrimaryLight;
 
-    // 分隔线
-    c[ImGuiCol_Separator] = ImVec4(0.20f, 0.22f, 0.28f, 0.60f);
-    c[ImGuiCol_SeparatorHovered] = accent;
-    c[ImGuiCol_SeparatorActive] = accent_hover;
-
-    // 边框
-    c[ImGuiCol_Border] = ImVec4(0.25f, 0.28f, 0.35f, 0.50f);
+    // Border
+    c[ImGuiCol_Border] = MD3Style::OutlineVariant;
     c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    // 滚动条
-    c[ImGuiCol_ScrollbarBg] = ImVec4(0.06f, 0.06f, 0.08f, 0.80f);
-    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.30f, 0.32f, 0.38f, 0.90f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.40f, 0.42f, 0.50f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.50f, 0.52f, 0.60f, 1.0f);
+    // Scrollbar
+    c[ImGuiCol_ScrollbarBg] = ImVec4(MD3Style::Surface.x, MD3Style::Surface.y, MD3Style::Surface.z, 0.60f);
+    c[ImGuiCol_ScrollbarGrab] = MD3Style::OutlineVariant;
+    c[ImGuiCol_ScrollbarGrabHovered] = MD3Style::Outline;
+    c[ImGuiCol_ScrollbarGrabActive] = MD3Style::Primary;
 
-    // 表格
-    c[ImGuiCol_TableHeaderBg] = bg_medium;
-    c[ImGuiCol_TableBorderStrong] = ImVec4(0.20f, 0.22f, 0.28f, 0.80f);
-    c[ImGuiCol_TableBorderLight] = ImVec4(0.15f, 0.16f, 0.20f, 0.50f);
+    // Table
+    c[ImGuiCol_TableHeaderBg] = MD3Style::SurfaceContainer;
+    c[ImGuiCol_TableBorderStrong] = MD3Style::OutlineVariant;
+    c[ImGuiCol_TableBorderLight] = MD3Style::OutlineVariant;
     c[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-    c[ImGuiCol_TableRowBgAlt] = ImVec4(0.10f, 0.12f, 0.16f, 0.30f);
+    c[ImGuiCol_TableRowBgAlt] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.05f);
 
-    // 导航
-    c[ImGuiCol_NavHighlight] = accent;
+    // Navigation
+    c[ImGuiCol_NavHighlight] = MD3Style::Primary;
     c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.0f, 1.0f, 1.0f, 0.70f);
     c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
 
-    // 模态窗口遮罩
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.10f, 0.10f, 0.15f, 0.70f);
+    // Modal Window Dim
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.60f);
 
-    // 样式设置
-    s.WindowRounding = 12.0f;
-    s.ChildRounding = 8.0f;
-    s.FrameRounding = 6.0f;
-    s.PopupRounding = 8.0f;
+    // Resize Grip
+    c[ImGuiCol_ResizeGrip] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.30f);
+    c[ImGuiCol_ResizeGripHovered] = MD3Style::Primary;
+    c[ImGuiCol_ResizeGripActive] = MD3Style::PrimaryLight;
+
+    // Plot
+    c[ImGuiCol_PlotLines] = MD3Style::OnSurfaceVariant;
+    c[ImGuiCol_PlotLinesHovered] = MD3Style::Primary;
+    c[ImGuiCol_PlotHistogram] = MD3Style::Primary;
+    c[ImGuiCol_PlotHistogramHovered] = MD3Style::PrimaryLight;
+
+    // Drag Drop
+    c[ImGuiCol_DragDropTarget] = MD3Style::Secondary;
+
+    // MD3 Style Settings
+    s.WindowRounding = 16.0f;
+    s.ChildRounding = 12.0f;
+    s.FrameRounding = 8.0f;
+    s.PopupRounding = 12.0f;
     s.ScrollbarRounding = 8.0f;
-    s.GrabRounding = 6.0f;
+    s.GrabRounding = 8.0f;
     s.TabRounding = 8.0f;
+    s.LogSliderDeadzone = 4.0f;
 
-    s.WindowPadding = ImVec2(12, 12);
-    s.FramePadding = ImVec2(10, 6);
-    s.ItemSpacing = ImVec2(10, 6);
-    s.ItemInnerSpacing = ImVec2(6, 4);
+    s.WindowPadding = ImVec2(16, 16);
+    s.FramePadding = ImVec2(12, 8);
+    s.ItemSpacing = ImVec2(12, 8);
+    s.ItemInnerSpacing = ImVec2(8, 6);
+    s.IndentSpacing = 24.0f;
+    s.CellPadding = ImVec2(8, 6);
 
     s.WindowBorderSize = 1.0f;
     s.ChildBorderSize = 0.0f;
     s.PopupBorderSize = 1.0f;
     s.FrameBorderSize = 0.0f;
+    s.TabBorderSize = 0.0f;
 
-    s.ScrollbarSize = 14.0f;
-    s.WindowMinSize = ImVec2(200, 200);
+    s.ScrollbarSize = 16.0f;
+    s.WindowMinSize = ImVec2(240, 240);
 
     s.WindowTitleAlign = ImVec2(0.5f, 0.5f);
     s.WindowMenuButtonPosition = ImGuiDir_None;
     s.ColorButtonPosition = ImGuiDir_Right;
     s.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+    s.SelectableTextAlign = ImVec2(0.0f, 0.5f);
 
     s.AntiAliasedLines = true;
     s.AntiAliasedFill = true;
+    
+    // MD3 specific
+    s.WindowShadowSize = 0.0f;
+    s.WindowShadowOffsetDist = 0.0f;
 }
 
 // ==========================================
 // 6. UI Drawing
 // ==========================================
+
+// Draw Dynamic Island Style Button
+static bool DrawDynamicIsland(ImVec2 pos, bool* clicked) {
+    ImGuiIO& io = ImGui::GetIO();
+    
+    // Animation - smooth lerp
+    float dt = io.DeltaTime;
+    MD3Style::IslandWidth += (MD3Style::IslandTargetWidth - MD3Style::IslandWidth) * MD3Style::IslandAnimSpeed * dt;
+    MD3Style::IslandHeight += (MD3Style::IslandTargetHeight - MD3Style::IslandHeight) * MD3Style::IslandAnimSpeed * dt;
+    
+    float width = MD3Style::IslandWidth;
+    float height = MD3Style::IslandHeight;
+    
+    // Calculate bounds
+    ImVec2 min(pos.x - width * 0.5f, pos.y - height * 0.5f);
+    ImVec2 max(pos.x + width * 0.5f, pos.y + height * 0.5f);
+    ImRect bb(min, max);
+    
+    // Check hover
+    bool hovered = bb.Contains(io.MousePos);
+    bool active = hovered && io.MouseDown[0];
+    
+    // Update hover time for glow effect
+    if (hovered) {
+        MD3Style::IslandHoverTime += dt;
+    } else {
+        MD3Style::IslandHoverTime = 0.0f;
+    }
+    
+    // Draw the island
+    ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+    
+    // Shadow
+    draw_list->AddShadowRect(min, max, 8.0f, ImVec4(0.0f, 0.0f, 0.0f, 0.3f), ImDrawFlags_ShadowCutOutShapeBackground);
+    
+    // Background with gradient effect
+    ImU32 bgColor;
+    if (active) {
+        bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::PrimaryDark);
+    } else if (hovered) {
+        bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::PrimaryLight);
+        // Expand on hover
+        MD3Style::IslandTargetWidth = 140.0f;
+        MD3Style::IslandTargetHeight = 42.0f;
+    } else {
+        bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::Primary);
+        // Contract when not hovered
+        MD3Style::IslandTargetWidth = 120.0f;
+        MD3Style::IslandTargetHeight = 36.0f;
+    }
+    
+    // Draw rounded rectangle (capsule shape)
+    float rounding = height * 0.5f;
+    draw_list->AddRectFilled(min, max, bgColor, rounding, ImDrawFlags_RoundCornersAll);
+    
+    // Glow effect when hovered
+    if (hovered && MD3Style::IslandHoverTime > 0.1f) {
+        float glowAlpha = 0.15f * sinf(MD3Style::IslandHoverTime * 3.0f);
+        ImVec4 glowColor = ImVec4(MD3Style::PrimaryLight.x, MD3Style::PrimaryLight.y, MD3Style::PrimaryLight.z, glowAlpha);
+        draw_list->AddRect(min - ImVec2(2, 2), max + ImVec2(2, 2), ImGui::ColorConvertFloat4ToU32(glowColor), rounding + 2, ImDrawFlags_RoundCornersAll, 2.0f);
+    }
+    
+    // Draw text/icon
+    ImVec2 textSize = ImGui::CalcTextSize("RF");
+    ImVec2 textPos(pos.x - textSize.x * 0.5f, pos.y - textSize.y * 0.5f);
+    draw_list->AddText(textPos, ImGui::ColorConvertFloat4ToU32(MD3Style::OnPrimary), "RF");
+    
+    // Handle click
+    if (hovered && io.MouseClicked[0]) {
+        *clicked = true;
+        return true;
+    }
+    
+    return false;
+}
+
 static void DrawUI() {
     if (g_UIFont) ImGui::PushFont(g_UIFont);
     ImGuiIO& io = ImGui::GetIO();
 
     // ============================================
-    // Floating Toggle Button
+    // Dynamic Island Toggle Button
     // ============================================
     if (!g_ShowUI) {
-        ImGui::SetNextWindowPos(ImVec2(15, io.DisplaySize.y * 0.5f), ImGuiCond_Always);
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.75f, 0.95f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.55f, 0.85f, 1.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 30.0f);
-        ImGui::Begin("##toggle", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground);
-        if (ImGui::Button(" RF ", ImVec2(55, 55))) g_ShowUI = true;
-        ImGui::End();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(2);
+        // Position at top center of screen
+        ImVec2 islandPos(io.DisplaySize.x * 0.5f, 50.0f);
+        bool clicked = false;
+        if (DrawDynamicIsland(islandPos, &clicked)) {
+            if (clicked) g_ShowUI = true;
+        }
         if (g_UIFont) ImGui::PopFont();
         return;
     }
@@ -2109,7 +2328,7 @@ static void DrawUI() {
     // ============================================
     // Main Window
     // ============================================
-    ImGui::SetNextWindowSize(ImVec2(420, 580), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(440, 620), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
@@ -2117,21 +2336,21 @@ static void DrawUI() {
     // ============================================
     // Presets Section
     // ============================================
-    ImGui::TextColored(ImVec4(0.50f, 0.52f, 0.60f, 1.0f), "Presets");
+    ImGui::TextColored(MD3Style::OnSurfaceVariant, "Presets");
     ImGui::Spacing();
     
     const char* preset_names[] = {"Original", "Manga B&W"};
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
     
     for (int i = 0; i < 2; i++) {
         bool selected = (RF::current_preset == i);
         if (selected) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.50f, 0.82f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Primary);
         } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.16f, 0.20f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::SurfaceContainerHigh);
         }
         
-        if (ImGui::Button(preset_names[i], ImVec2(ImGui::GetContentRegionAvail().x / 2 - 6, 36))) {
+        if (ImGui::Button(preset_names[i], ImVec2(ImGui::GetContentRegionAvail().x / 2 - 6, 40))) {
             RF::current_preset = i;
             RF::ApplyPreset(i);
             Config::SaveConfig();
@@ -2160,22 +2379,22 @@ static void DrawUI() {
             
             ImGui::PushItemWidth(-10);
             
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Brightness");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Brightness");
             if (ImGui::SliderFloat("##Bright", &RF::params.brightness, -0.5f, 0.5f, "%.2f")) Config::SaveConfig();
             
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Contrast");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Contrast");
             if (ImGui::SliderFloat("##Contrast", &RF::params.contrast, 0.6f, 1.8f, "%.2f")) Config::SaveConfig();
             
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Saturation");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Saturation");
             if (ImGui::SliderFloat("##Saturation", &RF::params.saturation, 0.0f, 2.0f, "%.2f")) Config::SaveConfig();
             
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Temperature");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Temperature");
             if (ImGui::SliderFloat("##Temp", &RF::params.temperature, -1.0f, 1.0f, "%.2f")) Config::SaveConfig();
             
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Vignette");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Vignette");
             if (ImGui::SliderFloat("##Vignette", &RF::params.vignette, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
             
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Film Grain");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Film Grain");
             if (ImGui::SliderFloat("##Grain", &RF::params.film_grain, 0.0f, 0.3f, "%.3f")) Config::SaveConfig();
             
             ImGui::PopItemWidth();
@@ -2187,7 +2406,7 @@ static void DrawUI() {
             ImGui::Spacing();
             
             // Art Style
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Art Style");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Art Style");
             const char* art_styles[] = {"Off", "Cel Anime", "Chinese Painting", "Sketch", "Anime Flat", "Comic", "Color Pencil"};
             ImGui::SetNextItemWidth(-10);
             if (ImGui::Combo("##ArtStyle", &RF::params.art_style, art_styles, IM_ARRAYSIZE(art_styles))) {
@@ -2197,7 +2416,7 @@ static void DrawUI() {
             
             if (RF::params.art_style > 0) {
                 ImGui::SetNextItemWidth(-10);
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Intensity");
+                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Intensity");
                 if (ImGui::SliderFloat("##ArtInt", &RF::params.art_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
             }
             
@@ -2231,7 +2450,7 @@ static void DrawUI() {
             ImGui::Spacing();
             
             // Season (四季滤镜)
-            ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Season");
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Season");
             
             // 四季自动轮换开关
             if (ImGui::Checkbox("Auto Season Rotation", &RF::params.enable_season_rotation)) {
@@ -2246,7 +2465,7 @@ static void DrawUI() {
             if (RF::params.enable_season_rotation) {
                 int current_season = RF::CalculateSeasonByTime();
                 const char* season_names[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
-                ImGui::TextColored(ImVec4(0.40f, 0.75f, 0.40f, 1.0f), "Current: %s", season_names[current_season]);
+                ImGui::TextColored(MD3Style::Success, "Current: %s", season_names[current_season]);
             }
             
             const char* seasons[] = {"Off", "Spring", "Summer", "Autumn", "Winter"};
@@ -2296,7 +2515,7 @@ static void DrawUI() {
                 ImGui::Spacing();
                 
                 // Pixel Size
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Pixel Size");
+                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Pixel Size");
                 const char* pixel_sizes[] = {"1px", "2px", "3px", "4px"};
                 ImGui::SetNextItemWidth(-10);
                 int pixel_idx = RF::params.pixel_size - 1;  // 转换为索引 (0-3)
@@ -2308,7 +2527,7 @@ static void DrawUI() {
                 ImGui::Spacing();
                 
                 // Palette Selection
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Color Palette");
+                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Color Palette");
                 const char* palettes[] = {"Game Boy (4)", "Sweetie 16 (16)", "Endesga 32 (32)"};
                 ImGui::SetNextItemWidth(-10);
                 // palette index is 1-3, need to adjust for combo
@@ -2321,9 +2540,94 @@ static void DrawUI() {
                 ImGui::Spacing();
                 
                 // Intensity
-                ImGui::TextColored(ImVec4(0.55f, 0.58f, 0.65f, 1.0f), "Intensity");
+                ImGui::TextColored(MD3Style::OnSurfaceVariant, "Intensity");
                 ImGui::SetNextItemWidth(-10);
                 if (ImGui::SliderFloat("##PixelInt", &RF::params.pixel_intensity, 0.0f, 1.0f, "%.2f")) Config::SaveConfig();
+            }
+            
+            ImGui::EndTabItem();
+        }
+
+        // Theme Tab (Color Customization)
+        if (ImGui::BeginTabItem("Theme")) {
+            ImGui::Spacing();
+            
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Color Scheme");
+            ImGui::Spacing();
+            
+            // Color scheme buttons
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 6));
+            
+            float btnWidth = (ImGui::GetContentRegionAvail().x - 12) / 3.0f;
+            
+            for (int i = 0; i < 8; i++) {
+                bool selected = (MD3Style::CurrentScheme == i);
+                
+                // Button with scheme color
+                ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Schemes[i].primary);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::Schemes[i].primaryLight);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, MD3Style::Schemes[i].primaryDark);
+                
+                if (selected) {
+                    ImGui::PushStyleColor(ImGuiCol_Border, MD3Style::OnPrimary);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+                }
+                
+                if (ImGui::Button(MD3Style::Schemes[i].name, ImVec2(btnWidth, 32))) {
+                    MD3Style::ApplyScheme(i);
+                    SetupStyle();
+                    Config::SaveConfig();
+                }
+                
+                if (selected) {
+                    ImGui::PopStyleVar();
+                    ImGui::PopStyleColor();
+                }
+                ImGui::PopStyleColor(3);
+                
+                if ((i + 1) % 3 != 0) ImGui::SameLine();
+            }
+            
+            ImGui::PopStyleVar(2);
+            ImGui::Spacing();
+            
+            // Custom color editor
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Custom Colors");
+            ImGui::Spacing();
+            
+            bool colorChanged = false;
+            
+            ImGui::PushItemWidth(-10);
+            
+            if (ImGui::ColorEdit4("Primary", (float*)&MD3Style::Primary, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+                MD3Style::CurrentScheme = MD3Style::SCHEME_CUSTOM;
+                colorChanged = true;
+            }
+            
+            if (ImGui::ColorEdit4("Primary Light", (float*)&MD3Style::PrimaryLight, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+                MD3Style::CurrentScheme = MD3Style::SCHEME_CUSTOM;
+                colorChanged = true;
+            }
+            
+            if (ImGui::ColorEdit4("Primary Dark", (float*)&MD3Style::PrimaryDark, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+                MD3Style::CurrentScheme = MD3Style::SCHEME_CUSTOM;
+                colorChanged = true;
+            }
+            
+            if (ImGui::ColorEdit4("Secondary", (float*)&MD3Style::Secondary, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
+                MD3Style::CurrentScheme = MD3Style::SCHEME_CUSTOM;
+                colorChanged = true;
+            }
+            
+            ImGui::PopItemWidth();
+            
+            if (colorChanged) {
+                SetupStyle();
+                Config::SaveConfig();
             }
             
             ImGui::EndTabItem();
@@ -2340,18 +2644,18 @@ static void DrawUI() {
     // Bottom Buttons
     // ============================================
     float btn_width = (ImGui::GetContentRegionAvail().x - 10) / 2;
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
     
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.50f, 0.82f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.58f, 0.90f, 1.0f));
-    if (ImGui::Button("Save Config", ImVec2(btn_width, 36))) Config::SaveConfig();
+    ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Primary);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::PrimaryLight);
+    if (ImGui::Button("Save Config", ImVec2(btn_width, 40))) Config::SaveConfig();
     ImGui::PopStyleColor(2);
     
     ImGui::SameLine();
     
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.20f, 0.25f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.28f, 0.35f, 1.0f));
-    if (ImGui::Button("Reset All", ImVec2(btn_width, 36))) {
+    ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::SurfaceContainerHigh);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::SurfaceContainerHighest);
+    if (ImGui::Button("Reset All", ImVec2(btn_width, 40))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
         Config::SaveConfig();
