@@ -212,6 +212,9 @@ namespace MD3Style {
     // Success Colors
     inline ImVec4 Success(0.298f, 0.686f, 0.314f, 1.0f);
     
+    // Error Colors
+    inline ImVec4 Error(0.937f, 0.251f, 0.251f, 1.0f);
+    
     // Background Theme Mode
     enum BackgroundTheme {
         THEME_DARK = 0,
@@ -2353,7 +2356,7 @@ static bool DrawDynamicIsland(bool* clicked) {
     // Handle click FIRST (before dragging)
     if (hovered && io.MouseClicked[0]) {
         *clicked = true;
-        MD3Style::IslandClickTime = io.Time;
+        MD3Style::IslandClickTime = ImGui::GetTime();
     }
     
     // Handle dragging - only start if held for a short time
@@ -2373,7 +2376,8 @@ static bool DrawDynamicIsland(bool* clicked) {
         }
     } else if (hovered && io.MouseDown[0]) {
         // Start dragging after a short delay to distinguish from click
-        if (MD3Style::IslandClickTime > 0.0f && (io.Time - MD3Style::IslandClickTime) > 0.15f) {
+        float currentTime = ImGui::GetTime();
+        if (MD3Style::IslandClickTime > 0.0f && (currentTime - MD3Style::IslandClickTime) > 0.15f) {
             MD3Style::IslandDragging = true;
             MD3Style::IslandDragOffset = ImVec2(io.MousePos.x - centerX, io.MousePos.y - centerY);
         }
@@ -2660,7 +2664,8 @@ static void DrawUI() {
         if (ImGui::SliderFloat("##OutlineThresh", &RF::params.outline_thresh, 0.05f, 0.5f, "Thresh: %.2f")) Config::SaveConfig();
         ImGui::PushItemWidth(170);
         if (ImGui::SliderFloat("##OutlineOpac", &RF::params.outline_opacity, 0.0f, 1.0f, "Opacity: %.2f")) Config::SaveConfig();
-        ImGui::PopItemWidth(2);
+        ImGui::PopItemWidth();
+        ImGui::PopItemWidth();
     }
     
     // RGB Split settings
@@ -2670,7 +2675,8 @@ static void DrawUI() {
         if (ImGui::SliderFloat("##TikTokOff", &RF::params.tiktok_offset, 0.0f, 0.05f, "Offset: %.3f")) Config::SaveConfig();
         ImGui::PushItemWidth(170);
         if (ImGui::SliderFloat("##TikTokInt", &RF::params.tiktok_intensity, 0.0f, 1.0f, "Int: %.2f")) Config::SaveConfig();
-        ImGui::PopItemWidth(2);
+        ImGui::PopItemWidth();
+        ImGui::PopItemWidth();
     }
     
     // Season intensity
@@ -2700,7 +2706,9 @@ static void DrawUI() {
         }
         ImGui::PushItemWidth(170);
         if (ImGui::SliderFloat("##PixelInt", &RF::params.pixel_intensity, 0.0f, 1.0f, "Int: %.2f")) Config::SaveConfig();
-        ImGui::PopItemWidth(3);
+        ImGui::PopItemWidth();
+        ImGui::PopItemWidth();
+        ImGui::PopItemWidth();
     }
     
     ImGui::PopStyleVar(2);
