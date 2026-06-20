@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <cfloat>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
@@ -25,6 +26,7 @@
 #include "ImGui/imgui.h"
 #include "ImGui/backends/imgui_impl_opengl3.h"
 #include "ImGui/backends/imgui_impl_android.h"
+#include "fonts_data.h"
 
 #define LOG_TAG "RenderFusion"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -49,6 +51,9 @@ struct PreloaderInput_Interface {
 };
 
 typedef PreloaderInput_Interface* (*GetPreloaderInput_Fn)();
+static bool g_PreloaderInputAvailable = false;
+static bool s_islandTouched = false;
+static void (*orig_MotionEvent_copyFrom)(void* self, void* other, void* keepHistory) = nullptr;
 
 // ==========================================
 // 1. Filter State & Params (ALL OFF BY DEFAULT)
@@ -2143,13 +2148,59 @@ void RenderFilters(int w, int h) {
 // ==========================================
 // 5. UI State & Theme
 // ==========================================
-static bool g_ShowUI = true;
+static bool g_ShowUI = false;
 static float g_FontScale = 1.0f;
 static ImFont* g_UIFont = nullptr;
+static ImFont* g_FontIsland = nullptr;
+static ImFont* g_FontSubtitle = nullptr;
+static ImFont* g_FontBody = nullptr;
+static ImFont* g_FontButton = nullptr;
 static bool g_Initialized = false;
 static int g_Width = 0, g_Height = 0;
 static EGLContext g_TargetContext = EGL_NO_CONTEXT;
 static EGLSurface g_TargetSurface = EGL_NO_SURFACE;
+
+static float g_DpiScale = 1.0f;
+
+static inline float Scale(float v) {
+    return v * g_DpiScale;
+}
+
+struct {
+    ImVec2 pos = ImVec2(-1, -1);
+    bool dragging = false;
+    bool dragStarted = false;
+    ImVec2 dragOffset = ImVec2(0, 0);
+    ImVec2 dragStart = ImVec2(0, 0);
+    float expandProgress = 0.0f;
+    double lastClickTime = 0.0;
+    bool justClicked = false;
+} g_Island;
+
+static ImVec2 Lerp(const ImVec2& a, const ImVec2& b, float t) {
+    return ImVec2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+}
+
+static ImVec4 LerpColor(const ImVec4& a, const ImVec4& b, float t) {
+    return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
+}
+
+static ImU32 BlendColor(ImU32 c1, ImU32 c2, float t) {
+    int r1 = (int)(c1 & 0xFF), g1 = (int)((c1 >> 8) & 0xFF), b1 = (int)((c1 >> 16) & 0xFF), a1 = (int)((c1 >> 24) & 0xFF);
+    int r2 = (int)(c2 & 0xFF), g2 = (int)((c2 >> 8) & 0xFF), b2 = (int)((c2 >> 16) & 0xFF), a2 = (int)((c2 >> 24) & 0xFF);
+    int r = (int)(r1 + (r2 - r1) * t), g = (int)(g1 + (g2 - g1) * t), b = (int)(b1 + (b2 - b1) * t), a = (int)(a1 + (a2 - a1) * t);
+    return (ImU32)((a << 24) | (b << 16) | (g << 8) | r);
+}
+
+static float EaseOutBack(float t) {
+    const float c1 = 1.70158f;
+    const float c3 = c1 + 1.0f;
+    return 1 + c3 * powf(t - 1, 3) + c1 * powf(t - 1, 2);
+}
+
+static float Clamp01(float v) {
+    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
 
 struct GLState {
     GLint prog, tex, aTex, aBuf, eBuf, vao, fbo, vp[4], sc[4], bSrc, bDst, bSrcA, bDstA;
@@ -2204,274 +2255,208 @@ static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    // MD3 Style - Material Design 3
-    // Window & Background
-    c[ImGuiCol_WindowBg] = MD3Style::BackgroundDim;
-    c[ImGuiCol_ChildBg] = MD3Style::SurfaceContainer;
-    c[ImGuiCol_PopupBg] = ImVec4(MD3Style::Surface.x, MD3Style::Surface.y, MD3Style::Surface.z, 0.98f);
+    c[ImGuiCol_Text]                 = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+    c[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.50f, 0.50f, 1.0f);
+    c[ImGuiCol_WindowBg]             = ImVec4(0.10f, 0.10f, 0.13f, 0.98f);
+    c[ImGuiCol_ChildBg]              = ImVec4(0.09f, 0.09f, 0.11f, 0.0f);
+    c[ImGuiCol_PopupBg]              = ImVec4(0.10f, 0.10f, 0.13f, 0.98f);
+    c[ImGuiCol_Border]               = ImVec4(0.17f, 0.17f, 0.26f, 0.5f);
+    c[ImGuiCol_BorderShadow]         = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_FrameBg]              = ImVec4(0.14f, 0.14f, 0.19f, 1.0f);
+    c[ImGuiCol_FrameBgHovered]       = ImVec4(0.17f, 0.17f, 0.24f, 1.0f);
+    c[ImGuiCol_FrameBgActive]        = ImVec4(0.20f, 0.20f, 0.29f, 1.0f);
+    c[ImGuiCol_TitleBg]              = ImVec4(0.10f, 0.10f, 0.13f, 1.0f);
+    c[ImGuiCol_TitleBgActive]        = ImVec4(0.10f, 0.10f, 0.13f, 1.0f);
+    c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.10f, 0.10f, 0.13f, 0.8f);
+    c[ImGuiCol_Button]               = MD3Style::Primary;
+    c[ImGuiCol_ButtonHovered]        = MD3Style::PrimaryLight;
+    c[ImGuiCol_ButtonActive]         = MD3Style::PrimaryDark;
+    c[ImGuiCol_SliderGrab]           = MD3Style::Primary;
+    c[ImGuiCol_SliderGrabActive]     = MD3Style::PrimaryLight;
+    c[ImGuiCol_CheckMark]            = MD3Style::Primary;
+    c[ImGuiCol_Separator]            = ImVec4(0.17f, 0.17f, 0.26f, 0.5f);
+    c[ImGuiCol_Header]               = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.2f);
+    c[ImGuiCol_HeaderHovered]        = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.3f);
+    c[ImGuiCol_HeaderActive]         = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.45f);
+    c[ImGuiCol_Tab]                  = ImVec4(0.14f, 0.14f, 0.19f, 1.0f);
+    c[ImGuiCol_TabHovered]           = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.3f);
+    c[ImGuiCol_TabActive]            = MD3Style::Primary;
+    c[ImGuiCol_TabUnfocused]         = ImVec4(0.10f, 0.10f, 0.13f, 1.0f);
+    c[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.14f, 0.14f, 0.19f, 1.0f);
+    c[ImGuiCol_TextSelectedBg]       = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.35f);
+    c[ImGuiCol_ScrollbarBg]          = ImVec4(0.09f, 0.09f, 0.11f, 0.6f);
+    c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.17f, 0.17f, 0.24f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.20f, 0.20f, 0.29f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabActive]  = MD3Style::Primary;
+    c[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.0f, 0.0f, 0.0f, 0.7f);
+    c[ImGuiCol_ResizeGrip]           = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.3f);
+    c[ImGuiCol_ResizeGripHovered]    = MD3Style::Primary;
+    c[ImGuiCol_ResizeGripActive]     = MD3Style::PrimaryLight;
 
-    // Title Bar
-    c[ImGuiCol_TitleBg] = MD3Style::Surface;
-    c[ImGuiCol_TitleBgActive] = MD3Style::SurfaceContainerHigh;
-    c[ImGuiCol_TitleBgCollapsed] = ImVec4(MD3Style::Surface.x, MD3Style::Surface.y, MD3Style::Surface.z, 0.80f);
+    s.WindowRounding    = Scale(20.0f);
+    s.ChildRounding     = Scale(14.0f);
+    s.FrameRounding     = Scale(12.0f);
+    s.PopupRounding     = Scale(14.0f);
+    s.GrabRounding      = Scale(10.0f);
+    s.ScrollbarRounding = Scale(10.0f);
+    s.TabRounding       = Scale(12.0f);
+    s.WindowPadding     = ImVec2(Scale(20), Scale(20));
+    s.FramePadding      = ImVec2(Scale(16), Scale(12));
+    s.ItemSpacing       = ImVec2(Scale(14), Scale(12));
+    s.ItemInnerSpacing  = ImVec2(Scale(10), Scale(8));
+    s.ScrollbarSize     = Scale(14.0f);
+    s.GrabMinSize       = Scale(24.0f);
+    s.WindowBorderSize  = 0;
+    s.ChildBorderSize   = 0;
+    s.PopupBorderSize   = 0;
+    s.FrameBorderSize   = 0;
+    s.TabBorderSize     = 0;
+    s.IndentSpacing     = Scale(24.0f);
+    s.CellPadding       = ImVec2(Scale(8), Scale(6));
 
-    // Frame Background
-    c[ImGuiCol_FrameBg] = MD3Style::SurfaceContainerHigh;
-    c[ImGuiCol_FrameBgHovered] = MD3Style::SurfaceContainerHighest;
-    c[ImGuiCol_FrameBgActive] = MD3Style::PrimaryDark;
-
-    // Buttons - MD3 Filled Button Style
-    c[ImGuiCol_Button] = MD3Style::Primary;
-    c[ImGuiCol_ButtonHovered] = MD3Style::PrimaryLight;
-    c[ImGuiCol_ButtonActive] = MD3Style::PrimaryDark;
-
-    // Slider
-    c[ImGuiCol_SliderGrab] = MD3Style::Primary;
-    c[ImGuiCol_SliderGrabActive] = MD3Style::PrimaryLight;
-
-    // Checkbox
-    c[ImGuiCol_CheckMark] = MD3Style::Primary;
-
-    // Text
-    c[ImGuiCol_Text] = MD3Style::OnSurface;
-    c[ImGuiCol_TextDisabled] = MD3Style::OnSurfaceVariant;
-    c[ImGuiCol_TextSelectedBg] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.30f);
-
-    // Header (Collapsing headers, trees, etc.)
-    c[ImGuiCol_Header] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.15f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.25f);
-    c[ImGuiCol_HeaderActive] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.40f);
-
-    // Tabs
-    c[ImGuiCol_Tab] = MD3Style::SurfaceContainerHigh;
-    c[ImGuiCol_TabHovered] = MD3Style::Primary;
-    c[ImGuiCol_TabActive] = MD3Style::PrimaryLight;
-    c[ImGuiCol_TabUnfocused] = MD3Style::SurfaceContainer;
-    c[ImGuiCol_TabUnfocusedActive] = MD3Style::SurfaceContainerHigh;
-
-    // Separator
-    c[ImGuiCol_Separator] = MD3Style::OutlineVariant;
-    c[ImGuiCol_SeparatorHovered] = MD3Style::Primary;
-    c[ImGuiCol_SeparatorActive] = MD3Style::PrimaryLight;
-
-    // Border
-    c[ImGuiCol_Border] = MD3Style::OutlineVariant;
-    c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    // Scrollbar
-    c[ImGuiCol_ScrollbarBg] = ImVec4(MD3Style::Surface.x, MD3Style::Surface.y, MD3Style::Surface.z, 0.60f);
-    c[ImGuiCol_ScrollbarGrab] = MD3Style::OutlineVariant;
-    c[ImGuiCol_ScrollbarGrabHovered] = MD3Style::Outline;
-    c[ImGuiCol_ScrollbarGrabActive] = MD3Style::Primary;
-
-    // Table
-    c[ImGuiCol_TableHeaderBg] = MD3Style::SurfaceContainer;
-    c[ImGuiCol_TableBorderStrong] = MD3Style::OutlineVariant;
-    c[ImGuiCol_TableBorderLight] = MD3Style::OutlineVariant;
-    c[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-    c[ImGuiCol_TableRowBgAlt] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.05f);
-
-    // Navigation
-    c[ImGuiCol_NavHighlight] = MD3Style::Primary;
-    c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.0f, 1.0f, 1.0f, 0.70f);
-    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-
-    // Modal Window Dim
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.60f);
-
-    // Resize Grip
-    c[ImGuiCol_ResizeGrip] = ImVec4(MD3Style::Primary.x, MD3Style::Primary.y, MD3Style::Primary.z, 0.30f);
-    c[ImGuiCol_ResizeGripHovered] = MD3Style::Primary;
-    c[ImGuiCol_ResizeGripActive] = MD3Style::PrimaryLight;
-
-    // Plot
-    c[ImGuiCol_PlotLines] = MD3Style::OnSurfaceVariant;
-    c[ImGuiCol_PlotLinesHovered] = MD3Style::Primary;
-    c[ImGuiCol_PlotHistogram] = MD3Style::Primary;
-    c[ImGuiCol_PlotHistogramHovered] = MD3Style::PrimaryLight;
-
-    // Drag Drop
-    c[ImGuiCol_DragDropTarget] = MD3Style::Secondary;
-
-    // MD3 Style Settings
-    s.WindowRounding = 16.0f;
-    s.ChildRounding = 12.0f;
-    s.FrameRounding = 8.0f;
-    s.PopupRounding = 12.0f;
-    s.ScrollbarRounding = 8.0f;
-    s.GrabRounding = 8.0f;
-    s.TabRounding = 8.0f;
-    s.LogSliderDeadzone = 4.0f;
-
-    s.WindowPadding = ImVec2(16, 16);
-    s.FramePadding = ImVec2(12, 8);
-    s.ItemSpacing = ImVec2(12, 8);
-    s.ItemInnerSpacing = ImVec2(8, 6);
-    s.IndentSpacing = 24.0f;
-    s.CellPadding = ImVec2(8, 6);
-
-    s.WindowBorderSize = 1.0f;
-    s.ChildBorderSize = 0.0f;
-    s.PopupBorderSize = 1.0f;
-    s.FrameBorderSize = 0.0f;
-    s.TabBorderSize = 0.0f;
-
-    s.ScrollbarSize = 16.0f;
-    s.WindowMinSize = ImVec2(240, 240);
-
-    s.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+    s.WindowMinSize     = ImVec2(Scale(400), Scale(300));
+    s.WindowTitleAlign  = ImVec2(0.5f, 0.5f);
     s.WindowMenuButtonPosition = ImGuiDir_None;
     s.ColorButtonPosition = ImGuiDir_Right;
-    s.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+    s.ButtonTextAlign   = ImVec2(0.5f, 0.5f);
     s.SelectableTextAlign = ImVec2(0.0f, 0.5f);
 
     s.AntiAliasedLines = true;
-    s.AntiAliasedFill = true;
+    s.AntiAliasedFill  = true;
 }
 
 // ==========================================
 // 6. UI Drawing
 // ==========================================
 
-// Draw Dynamic Island Style Button (Draggable)
+static bool IsPointInCircle(float x, float y, const ImVec2& center, float radius) {
+    float dx = x - center.x;
+    float dy = y - center.y;
+    return dx * dx + dy * dy <= radius * radius;
+}
+
+static bool IsPointInIsland(float x, float y) {
+    if (!g_Initialized) return false;
+    if (g_ShowUI) return false;
+    if (g_Island.pos.x < 0) return false;
+    float radius = Scale(32.0f);
+    float hitRadius = radius + Scale(16.0f);
+    return IsPointInCircle(x, y, g_Island.pos, hitRadius);
+}
+
+// Draw Circular Floating Window Button (Draggable, Single-click to toggle)
 static bool DrawDynamicIsland(bool* clicked) {
     ImGuiIO& io = ImGui::GetIO();
-    
-    float dt = io.DeltaTime;
-    MD3Style::IslandWidth += (MD3Style::IslandTargetWidth - MD3Style::IslandWidth) * MD3Style::IslandAnimSpeed * dt;
-    MD3Style::IslandHeight += (MD3Style::IslandTargetHeight - MD3Style::IslandHeight) * MD3Style::IslandAnimSpeed * dt;
-    
-    float width = MD3Style::IslandWidth;
-    float height = MD3Style::IslandHeight;
-    
-    // Calculate position from normalized coords
-    float centerX = MD3Style::IslandPos.x * io.DisplaySize.x;
-    float centerY = MD3Style::IslandPos.y;
-    
-    ImVec2 min(centerX - width * 0.5f, centerY - height * 0.5f);
-    ImVec2 max(centerX + width * 0.5f, centerY + height * 0.5f);
-    
-    bool hovered = (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y);
-    
-    // Track mouse down state
-    static bool wasMouseDown = false;
-    static bool wasHoveredOnMouseDown = false;
-    
-    // When mouse is pressed down on the island
-    if (hovered && io.MouseClicked[0]) {
-        MD3Style::IslandClickTime = ImGui::GetTime();
-        wasHoveredOnMouseDown = true;
-    }
-    
-    // Handle dragging
-    if (MD3Style::IslandDragging) {
-        if (io.MouseDown[0]) {
-            // Update position while dragging
-            float newCenterX = io.MousePos.x - MD3Style::IslandDragOffset.x;
-            float newCenterY = io.MousePos.y - MD3Style::IslandDragOffset.y;
-            
-            // Clamp to screen bounds (manual clamp for older ImGui compatibility)
-            float normX = newCenterX / io.DisplaySize.x;
-            MD3Style::IslandPos.x = normX < 0.15f ? 0.15f : (normX > 0.85f ? 0.85f : normX);
-            MD3Style::IslandPos.y = newCenterY < 30.0f ? 30.0f : (newCenterY > io.DisplaySize.y * 0.5f ? io.DisplaySize.y * 0.5f : newCenterY);
-            Config::SaveConfig();
-        } else {
-            MD3Style::IslandDragging = false;
-        }
-    } else if (wasHoveredOnMouseDown && io.MouseDown[0]) {
-        // Start dragging after holding for 0.2 seconds
-        float currentTime = ImGui::GetTime();
-        if (MD3Style::IslandClickTime > 0.0f && (currentTime - MD3Style::IslandClickTime) > 0.2f) {
-            MD3Style::IslandDragging = true;
-            MD3Style::IslandDragOffset = ImVec2(io.MousePos.x - centerX, io.MousePos.y - centerY);
-        }
-    }
-    
-    // Detect click (mouse released quickly without dragging)
-    if (!io.MouseDown[0] && wasMouseDown && wasHoveredOnMouseDown && !MD3Style::IslandDragging) {
-        float currentTime = ImGui::GetTime();
-        if (MD3Style::IslandClickTime > 0.0f && (currentTime - MD3Style::IslandClickTime) < 0.2f) {
-            *clicked = true;
-        }
-        wasHoveredOnMouseDown = false;
-        MD3Style::IslandClickTime = 0.0f;
-    }
-    
-    wasMouseDown = io.MouseDown[0];
-    
-    if (hovered && !MD3Style::IslandDragging) {
-        MD3Style::IslandHoverTime += dt;
-    } else {
-        MD3Style::IslandHoverTime = 0.0f;
-    }
-    
     ImDrawList* draw_list = ImGui::GetForegroundDrawList();
-    
-    float rounding = height * 0.5f;
-    
-    // Draw shadow
-    ImVec2 shadowOffset(0, 4);
-    ImVec2 shadowMin(min.x + shadowOffset.x - 4, min.y + shadowOffset.y - 4);
-    ImVec2 shadowMax(max.x + shadowOffset.x + 4, max.y + shadowOffset.y + 4);
-    ImU32 shadowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.25f));
-    draw_list->AddRectFilled(shadowMin, shadowMax, shadowColor, rounding + 2);
-    
-    // Background color (use custom island color)
-    ImU32 bgColor;
-    if (MD3Style::IslandDragging) {
-        bgColor = ImGui::ColorConvertFloat4ToU32(ImVec4(
-            MD3Style::IslandBgColor.x * 0.8f,
-            MD3Style::IslandBgColor.y * 0.8f,
-            MD3Style::IslandBgColor.z * 0.8f,
-            1.0f
-        ));
-        MD3Style::IslandTargetWidth = 100.0f;
-        MD3Style::IslandTargetHeight = 40.0f;
-    } else if (hovered) {
-        bgColor = ImGui::ColorConvertFloat4ToU32(ImVec4(
-            MD3Style::IslandBgColor.x * 1.1f,
-            MD3Style::IslandBgColor.y * 1.1f,
-            MD3Style::IslandBgColor.z * 1.1f,
-            1.0f
-        ));
-        MD3Style::IslandTargetWidth = 140.0f;
-        MD3Style::IslandTargetHeight = 42.0f;
+
+    const float radius = Scale(32.0f);
+    const float hitRadius = radius + Scale(16.0f);
+    const float dragThreshold = Scale(8.0f);
+
+    if (g_Island.pos.x < 0) {
+        g_Island.pos = ImVec2(io.DisplaySize.x - radius - Scale(30.0f), Scale(100.0f));
+    }
+
+    ImVec2 center = g_Island.pos;
+    bool inCircle = (io.MousePos.x - center.x) * (io.MousePos.x - center.x) +
+                    (io.MousePos.y - center.y) * (io.MousePos.y - center.y) <= hitRadius * hitRadius;
+
+    *clicked = false;
+
+    // When UI is shown, DON'T process any mouse input for the island
+    if (!g_ShowUI) {
+        // Handle mouse down
+        if (inCircle && io.MouseClicked[0] && !g_Island.dragging) {
+            g_Island.dragStart = io.MousePos;
+            g_Island.dragOffset = ImVec2(io.MousePos.x - center.x, io.MousePos.y - center.y);
+            g_Island.dragStarted = false;
+        }
+
+        if (io.MouseDown[0]) {
+            float dx = io.MousePos.x - g_Island.dragStart.x;
+            float dy = io.MousePos.y - g_Island.dragStart.y;
+            float dist = sqrtf(dx*dx + dy*dy);
+
+            if (g_Island.dragStart.x >= 0 && !g_Island.dragStarted && dist > dragThreshold) {
+                g_Island.dragStarted = true;
+                g_Island.dragging = true;
+            }
+
+            if (g_Island.dragging) {
+                g_Island.pos = ImVec2(io.MousePos.x - g_Island.dragOffset.x, io.MousePos.y - g_Island.dragOffset.y);
+                if (g_Island.pos.x < radius) g_Island.pos.x = radius;
+                if (g_Island.pos.x > io.DisplaySize.x - radius) g_Island.pos.x = io.DisplaySize.x - radius;
+                if (g_Island.pos.y < radius) g_Island.pos.y = radius;
+                if (g_Island.pos.y > io.DisplaySize.y - radius) g_Island.pos.y = io.DisplaySize.y - radius;
+            }
+        } else {
+            // Mouse released
+            if (g_Island.dragging) {
+                g_Island.dragging = false;
+                g_Island.dragStarted = false;
+            } else if (g_Island.dragStart.x >= 0 && inCircle) {
+                // Single click (without dragging) toggles UI
+                *clicked = true;
+            }
+            g_Island.dragStart = ImVec2(-1, -1);
+        }
     } else {
-        bgColor = ImGui::ColorConvertFloat4ToU32(MD3Style::IslandBgColor);
-        MD3Style::IslandTargetWidth = 120.0f;
-        MD3Style::IslandTargetHeight = 36.0f;
+        // UI is showing - reset drag state
+        g_Island.dragging = false;
+        g_Island.dragStarted = false;
+        g_Island.dragStart = ImVec2(-1, -1);
     }
-    
-    draw_list->AddRectFilled(min, max, bgColor, rounding, ImDrawFlags_RoundCornersAll);
-    
-    // Glow effect
-    if (hovered && MD3Style::IslandHoverTime > 0.1f && !MD3Style::IslandDragging) {
-        float glowAlpha = 0.2f * sinf(MD3Style::IslandHoverTime * 3.0f);
-        ImVec4 glowColor = ImVec4(
-            MD3Style::IslandBgColor.x,
-            MD3Style::IslandBgColor.y,
-            MD3Style::IslandBgColor.z,
-            glowAlpha
-        );
-        ImVec2 glowMin(min.x - 3, min.y - 3);
-        ImVec2 glowMax(max.x + 3, max.y + 3);
-        draw_list->AddRect(glowMin, glowMax, ImGui::ColorConvertFloat4ToU32(glowColor), rounding + 3, ImDrawFlags_RoundCornersAll, 2.0f);
+
+    ImU32 colIdle    = ImGui::ColorConvertFloat4ToU32(MD3Style::IslandBgColor);
+    ImU32 colHover   = ImGui::ColorConvertFloat4ToU32(ImVec4(
+        MD3Style::IslandBgColor.x * 1.15f,
+        MD3Style::IslandBgColor.y * 1.15f,
+        MD3Style::IslandBgColor.z * 1.15f,
+        1.0f
+    ));
+    ImU32 colPress   = ImGui::ColorConvertFloat4ToU32(ImVec4(
+        MD3Style::IslandBgColor.x * 0.8f,
+        MD3Style::IslandBgColor.y * 0.8f,
+        MD3Style::IslandBgColor.z * 0.8f,
+        1.0f
+    ));
+
+    ImU32 bgCol;
+    float rAdd = 0.0f;
+    bool pressed = inCircle && io.MouseDown[0] && !g_Island.dragStarted && !g_ShowUI;
+    if (g_Island.dragging || pressed) {
+        bgCol = colPress;
+        rAdd = Scale(3.0f);
+    } else if (inCircle && !g_ShowUI) {
+        bgCol = colHover;
+        rAdd = Scale(2.0f);
+    } else {
+        bgCol = colIdle;
     }
-    
-    // Draw text/icon
-    ImVec2 textSize = ImGui::CalcTextSize("RF");
-    ImVec2 textPos(centerX - textSize.x * 0.5f, centerY - textSize.y * 0.5f);
-    
-    // Text color based on background brightness
-    float brightness = MD3Style::IslandBgColor.x * 0.299f + MD3Style::IslandBgColor.y * 0.587f + MD3Style::IslandBgColor.z * 0.114f;
-    ImU32 textColor = brightness > 0.5f ? ImGui::ColorConvertFloat4ToU32(ImVec4(0.1f, 0.1f, 0.1f, 1.0f)) : ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-    draw_list->AddText(textPos, textColor, "RF");
-    
-    if (*clicked) {
-        return true;
+
+    // Shadow
+    draw_list->AddCircleFilled(ImVec2(center.x, center.y + Scale(4.0f)), radius + rAdd, IM_COL32(0, 0, 0, 100), 48);
+
+    // Main circle
+    draw_list->AddCircleFilled(center, radius + rAdd, bgCol, 48);
+
+    // Border
+    ImU32 borderCol = g_ShowUI ? 
+        IM_COL32((int)(MD3Style::Primary.x*255), (int)(MD3Style::Primary.y*255), (int)(MD3Style::Primary.z*255), 220) : 
+        IM_COL32(255,255,255,80);
+    draw_list->AddCircle(center, radius + rAdd, borderCol, 48, Scale(2.5f));
+
+    // Label
+    if (g_FontIsland) {
+        const char* label = "RF";
+        ImVec2 ts = g_FontIsland->CalcTextSizeA(g_FontIsland->FontSize, FLT_MAX, 0.0f, label);
+        float brightness = MD3Style::IslandBgColor.x * 0.299f + MD3Style::IslandBgColor.y * 0.587f + MD3Style::IslandBgColor.z * 0.114f;
+        ImU32 textCol = brightness > 0.5f ? IM_COL32(25, 25, 25, 255) : IM_COL32(255, 255, 255, 255);
+        draw_list->AddText(g_FontIsland, g_FontIsland->FontSize,
+            ImVec2(center.x - ts.x * 0.5f, center.y - ts.y * 0.5f), textCol, label);
     }
-    
-    return false;
+
+    return *clicked;
 }
 
 static void DrawUI() {
@@ -2479,43 +2464,45 @@ static void DrawUI() {
     ImGuiIO& io = ImGui::GetIO();
 
     // ============================================
-    // Dynamic Island Toggle Button
+    // Circular Floating Button (Always visible, double-click to toggle)
     // ============================================
+    bool clicked = false;
+    DrawDynamicIsland(&clicked);
+    if (clicked) {
+        g_ShowUI = !g_ShowUI;
+    }
+    
     if (!g_ShowUI) {
-        bool clicked = false;
-        if (DrawDynamicIsland(&clicked)) {
-            if (clicked) g_ShowUI = true;
-        }
         if (g_UIFont) ImGui::PopFont();
         return;
     }
 
     // ============================================
-    // Main Window - Tab-Based Layout
+    // Main Window - Tab-Based Layout (Larger Size)
     // ============================================
-    ImGui::SetNextWindowSize(ImVec2(460, 600), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(780, 900), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 20.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 6));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 24.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(12, 10));
     ImGui::Begin("RenderFusion", &g_ShowUI, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
 
     // ============================================
     // Preset Buttons (Auto-size based on text)
     // ============================================
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 10));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 24.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28, 14));
     
     // Calculate button widths based on text
     ImVec2 originalTextSize = ImGui::CalcTextSize("Original");
     ImVec2 mangaTextSize = ImGui::CalcTextSize("Manga B&W");
-    float originalBtnWidth = originalTextSize.x + 40;  // Add padding
-    float mangaBtnWidth = mangaTextSize.x + 40;
+    float originalBtnWidth = originalTextSize.x + 56;  // Add padding
+    float mangaBtnWidth = mangaTextSize.x + 56;
     
     ImGui::PushStyleColor(ImGuiCol_Button, RF::current_preset == 0 ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, RF::current_preset == 0 ? MD3Style::PrimaryLight : MD3Style::SurfaceContainerHighest);
-    if (ImGui::Button("Original", ImVec2(originalBtnWidth, 38))) {
+    if (ImGui::Button("Original", ImVec2(originalBtnWidth, 50))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
         Config::SaveConfig();
@@ -2526,7 +2513,7 @@ static void DrawUI() {
     
     ImGui::PushStyleColor(ImGuiCol_Button, RF::current_preset == 1 ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, RF::current_preset == 1 ? MD3Style::PrimaryLight : MD3Style::SurfaceContainerHighest);
-    if (ImGui::Button("Manga B&W", ImVec2(mangaBtnWidth, 38))) {
+    if (ImGui::Button("Manga B&W", ImVec2(mangaBtnWidth, 50))) {
         RF::current_preset = 1;
         RF::ApplyPreset(1);
         Config::SaveConfig();
@@ -2727,104 +2714,6 @@ static void DrawUI() {
             ImGui::EndTabItem();
         }
 
-        // ============================================
-        // Theme Tab
-        // ============================================
-        if (ImGui::BeginTabItem("Theme")) {
-            ImGui::Spacing();
-            
-            // Background Theme
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Background Theme");
-            ImGui::Spacing();
-            
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 16.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16, 8));
-            
-            const char* bg_themes[] = {"Dark", "Light", "AMOLED"};
-            for (int i = 0; i < 3; i++) {
-                bool selected = (MD3Style::CurrentBackgroundTheme == i);
-                ImVec2 textSize = ImGui::CalcTextSize(bg_themes[i]);
-                float btnWidth = textSize.x + 32;
-                ImGui::PushStyleColor(ImGuiCol_Button, selected ? MD3Style::Primary : MD3Style::SurfaceContainerHigh);
-                if (ImGui::Button(bg_themes[i], ImVec2(btnWidth, 32))) {
-                    MD3Style::ApplyBackgroundTheme(i);
-                    SetupStyle();
-                    Config::SaveConfig();
-                }
-                ImGui::PopStyleColor();
-                if (i < 2) ImGui::SameLine();
-            }
-            ImGui::PopStyleVar(2);
-            
-            ImGui::Spacing();
-            
-            // Custom Background Tint
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Custom Background Tint");
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-            if (ImGui::ColorEdit4("##BgTint", (float*)&MD3Style::CustomBgTint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)) {
-                MD3Style::ApplyBackgroundTheme(MD3Style::CurrentBackgroundTheme);
-                SetupStyle();
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            ImGui::PopItemWidth();
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            // Accent Colors
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Accent Color");
-            ImGui::Spacing();
-            
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12, 6));
-            
-            const char* color_names[] = {"Red", "Purple", "Blue", "Green", "Orange", "Pink", "Cyan", "Moon"};
-            for (int i = 0; i < 8; i++) {
-                bool selected = (MD3Style::CurrentScheme == i);
-                ImVec2 textSize = ImGui::CalcTextSize(color_names[i]);
-                float btnWidth = textSize.x + 24;
-                ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Schemes[i].primary);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::Schemes[i].primaryLight);
-                
-                if (selected) {
-                    ImGui::PushStyleColor(ImGuiCol_Border, MD3Style::OnSurface);
-                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
-                }
-                
-                if (ImGui::Button(color_names[i], ImVec2(btnWidth, 28))) {
-                    MD3Style::ApplyScheme(i);
-                    SetupStyle();
-                    Config::SaveConfig();
-                }
-                
-                if (selected) {
-                    ImGui::PopStyleVar();
-                    ImGui::PopStyleColor();
-                }
-                ImGui::PopStyleColor(2);
-                
-                if ((i + 1) % 4 != 0) ImGui::SameLine();
-            }
-            ImGui::PopStyleVar(2);
-            
-            ImGui::Spacing();
-            
-            // Island Color
-            ImGui::TextColored(MD3Style::OnSurfaceVariant, "Island Color");
-            ImGui::PushItemWidth(-1);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-            if (ImGui::ColorEdit4("##IslandColor", (float*)&MD3Style::IslandBgColor, ImGuiColorEditFlags_NoInputs)) {
-                Config::SaveConfig();
-            }
-            ImGui::PopStyleVar();
-            ImGui::PopItemWidth();
-            
-            ImGui::EndTabItem();
-        }
-
         ImGui::EndTabBar();
     }
     
@@ -2838,18 +2727,18 @@ static void DrawUI() {
     // ============================================
     // Bottom Buttons (Auto-size based on text)
     // ============================================
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 18.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 10));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 22.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28, 14));
     
     // Calculate button widths based on text
     ImVec2 saveTextSize = ImGui::CalcTextSize("Save Config");
     ImVec2 resetTextSize = ImGui::CalcTextSize("Reset All");
-    float saveBtnWidth = saveTextSize.x + 40;
-    float resetBtnWidth = resetTextSize.x + 40;
+    float saveBtnWidth = saveTextSize.x + 56;
+    float resetBtnWidth = resetTextSize.x + 56;
     
     ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::Primary);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::PrimaryLight);
-    if (ImGui::Button("Save Config", ImVec2(saveBtnWidth, 38))) {
+    if (ImGui::Button("Save Config", ImVec2(saveBtnWidth, 50))) {
         Config::SaveConfig();
     }
     ImGui::PopStyleColor(2);
@@ -2858,7 +2747,7 @@ static void DrawUI() {
     
     ImGui::PushStyleColor(ImGuiCol_Button, MD3Style::SurfaceContainerHigh);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, MD3Style::SurfaceContainerHighest);
-    if (ImGui::Button("Reset All", ImVec2(resetBtnWidth, 38))) {
+    if (ImGui::Button("Reset All", ImVec2(resetBtnWidth, 50))) {
         RF::current_preset = 0;
         RF::ApplyPreset(0);
         Config::SaveConfig();
@@ -2884,19 +2773,30 @@ static void Setup() {
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
 
-    float baseScale = (float)g_Height / 720.0f;
-    g_FontScale = std::clamp(baseScale, 1.0f, 2.0f);
+    g_DpiScale = (float)g_Height / 900.0f;
+    if (g_DpiScale < 0.85f) g_DpiScale = 0.85f;
+    if (g_DpiScale > 2.2f) g_DpiScale = 2.2f;
+    g_FontScale = g_DpiScale;
 
+    io.Fonts->Clear();
     ImFontConfig cfg;
-    cfg.SizePixels = (float)(int)(20.0f * g_FontScale);
+    cfg.FontDataOwnedByAtlas = false;
     cfg.OversampleH = cfg.OversampleV = 2;
     cfg.PixelSnapH = true;
-    g_UIFont = io.Fonts->AddFontDefault(&cfg);
+
+    g_FontIsland   = io.Fonts->AddFontFromMemoryTTF((void*)inter_medium.data(), (int)inter_medium.size(), Scale(28.0f), &cfg, io.Fonts->GetGlyphRangesDefault());
+    g_FontSubtitle = io.Fonts->AddFontFromMemoryTTF((void*)inter_medium.data(), (int)inter_medium.size(), Scale(18.0f), &cfg, io.Fonts->GetGlyphRangesDefault());
+    g_FontBody     = io.Fonts->AddFontFromMemoryTTF((void*)inter_medium.data(), (int)inter_medium.size(), Scale(22.0f), &cfg, io.Fonts->GetGlyphRangesDefault());
+    g_FontButton   = io.Fonts->AddFontFromMemoryTTF((void*)inter_medium.data(), (int)inter_medium.size(), Scale(24.0f), &cfg, io.Fonts->GetGlyphRangesDefault());
+    g_UIFont       = g_FontBody;
+    if (g_FontBody) io.FontDefault = g_FontBody;
 
     ImGui_ImplAndroid_Init(nullptr);
     ImGui_ImplOpenGL3_Init("#version 300 es");
+    MD3Style::ApplyScheme(0);
     SetupStyle();
     g_Initialized = true;
+    LOGI("ImGui setup complete, DPI scale: %.2f", g_DpiScale);
 }
 
 static void RenderUI() {
@@ -2918,8 +2818,6 @@ static void RenderUI() {
 }
 
 static EGLBoolean (*orig_eglSwapBuffers)(EGLDisplay, EGLSurface) = nullptr;
-static void (*orig_Input1)(void*, void*, void*) = nullptr;
-static int32_t (*orig_Input2)(void*, void*, bool, long, uint32_t*, AInputEvent**) = nullptr;
 
 static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
     if (!orig_eglSwapBuffers) return orig_eglSwapBuffers(d, s);
@@ -2963,70 +2861,119 @@ static EGLBoolean hook_eglSwapBuffers(EGLDisplay d, EGLSurface s) {
     return orig_eglSwapBuffers(d, s);
 }
 
-// ===================== PreloaderInput Touch Callback =====================
-static bool OnTouchCallback(int action, int pointerId, float x, float y) {
-    if (!g_Initialized) return false;
-    
+// ===================== Touch Event Dispatch =====================
+static void HandleTouchEvent(int action, int pointerId, float x, float y) {
+    if (!g_Initialized) return;
     ImGuiIO& io = ImGui::GetIO();
     io.AddMousePosEvent(x, y);
-    
     if (action == AMOTION_EVENT_ACTION_DOWN) {
         io.AddMouseButtonEvent(0, true);
-    } else if (action == AMOTION_EVENT_ACTION_UP) {
+    } else if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL) {
         io.AddMouseButtonEvent(0, false);
     }
-    
-    return io.WantCaptureMouse;
+}
+
+static bool DispatchTouchToImGui(int action, int pointerId, float x, float y) {
+    if (!g_Initialized) return false;
+    if (g_ShowUI) {
+        HandleTouchEvent(action, pointerId, x, y);
+        return true;
+    }
+    if (action == AMOTION_EVENT_ACTION_DOWN) {
+        if (IsPointInIsland(x, y)) {
+            s_islandTouched = true;
+            HandleTouchEvent(action, pointerId, x, y);
+            return true;
+        }
+        s_islandTouched = false;
+    } else if (action == AMOTION_EVENT_ACTION_MOVE) {
+        if (s_islandTouched) {
+            HandleTouchEvent(action, pointerId, x, y);
+            return true;
+        }
+    } else if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL) {
+        if (s_islandTouched) {
+            HandleTouchEvent(action, pointerId, x, y);
+            s_islandTouched = false;
+            return true;
+        }
+        s_islandTouched = false;
+    }
+    return false;
+}
+
+static bool OnTouchCallback(int action, int pointerId, float x, float y) {
+    return DispatchTouchToImGui(action, pointerId, x, y);
 }
 
 static void RegisterPreloaderInputCallback() {
     void* lib = dlopen("libpreloader.so", RTLD_NOW);
     if (!lib) {
-        LOGI("libpreloader.so not found, skipping PreloaderInput");
+        LOGI("libpreloader.so not found, using MotionEvent::copyFrom fallback");
         return;
     }
-    
+
     GetPreloaderInput_Fn getPreloaderInput = (GetPreloaderInput_Fn)dlsym(lib, "GetPreloaderInput");
     if (!getPreloaderInput) {
         LOGI("GetPreloaderInput symbol not found");
         dlclose(lib);
         return;
     }
-    
+
     PreloaderInput_Interface* inputInterface = getPreloaderInput();
     if (inputInterface && inputInterface->RegisterTouchCallback) {
         inputInterface->RegisterTouchCallback(OnTouchCallback);
+        g_PreloaderInputAvailable = true;
         LOGI("PreloaderInput touch callback registered");
     }
-    
+
     dlclose(lib);
 }
 
-// ===================== Input Hook =====================
-static void hook_Input1(void* thiz, void* a1, void* a2) {
-    if (orig_Input1) orig_Input1(thiz, a1, a2);
-    if (thiz && g_Initialized) ImGui_ImplAndroid_HandleInputEvent((AInputEvent*)thiz);
-}
+// ===================== MotionEvent::copyFrom Fallback Hook =====================
+static void hook_MotionEvent_copyFrom(void* self, void* other, void* keepHistory) {
+    if (orig_MotionEvent_copyFrom) orig_MotionEvent_copyFrom(self, other, keepHistory);
+    if (!g_Initialized || g_PreloaderInputAvailable) return;
 
-static int32_t hook_Input2(void* thiz, void* a1, bool a2, long a3, uint32_t* a4, AInputEvent** e) {
-    int32_t r = orig_Input2 ? orig_Input2(thiz, a1, a2, a3, a4, e) : 0;
-    if (r == 0 && e && *e && g_Initialized)
-        ImGui_ImplAndroid_HandleInputEvent(*e);
-    return r;
+    AInputEvent* inputEvent = (AInputEvent*)self;
+    if (AInputEvent_getType(inputEvent) != AINPUT_EVENT_TYPE_MOTION) return;
+
+    int32_t action = AMotionEvent_getAction(inputEvent);
+    int actionMasked = action & AMOTION_EVENT_ACTION_MASK;
+    int pointerIndex = (action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
+    size_t pointerCount = AMotionEvent_getPointerCount(inputEvent);
+
+    if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
+        int id = AMotionEvent_getPointerId(inputEvent, pointerIndex);
+        float x = AMotionEvent_getX(inputEvent, pointerIndex);
+        float y = AMotionEvent_getY(inputEvent, pointerIndex);
+        DispatchTouchToImGui(AMOTION_EVENT_ACTION_DOWN, id, x, y);
+    } else if (actionMasked == AMOTION_EVENT_ACTION_MOVE) {
+        for (size_t i = 0; i < pointerCount; i++) {
+            int id = AMotionEvent_getPointerId(inputEvent, i);
+            float x = AMotionEvent_getX(inputEvent, i);
+            float y = AMotionEvent_getY(inputEvent, i);
+            DispatchTouchToImGui(AMOTION_EVENT_ACTION_MOVE, id, x, y);
+        }
+    } else if (actionMasked == AMOTION_EVENT_ACTION_UP || actionMasked == AMOTION_EVENT_ACTION_POINTER_UP) {
+        int id = AMotionEvent_getPointerId(inputEvent, pointerIndex);
+        float x = AMotionEvent_getX(inputEvent, pointerIndex);
+        float y = AMotionEvent_getY(inputEvent, pointerIndex);
+        DispatchTouchToImGui(AMOTION_EVENT_ACTION_UP, id, x, y);
+    } else if (actionMasked == AMOTION_EVENT_ACTION_CANCEL) {
+        DispatchTouchToImGui(AMOTION_EVENT_ACTION_CANCEL, 0, 0, 0);
+        s_islandTouched = false;
+    }
 }
 
 static void HookInput() {
-    void* sym1 = (void*)GlossSymbol(GlossOpen("libinput.so"),
-        "_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE", nullptr);
-    if (sym1) {
-        GHook h = GlossHook(sym1, (void*)hook_Input1, (void**)&orig_Input1);
-        if (h) return;
-    }
-    void* sym2 = (void*)GlossSymbol(GlossOpen("libinput.so"),
-        "_ZN7android13InputConsumer7consumeEPNS_26InputEventFactoryInterfaceEblPjPPNS_10InputEventE", nullptr);
-    if (sym2) {
-        GHook h = GlossHook(sym2, (void*)hook_Input2, (void**)&orig_Input2);
-        if (h) return;
+    GHandle handle = GlossOpen("libinput.so");
+    if (handle) {
+        uintptr_t sym = GlossSymbol(handle, "_ZN7android11MotionEvent8copyFromEPKS0_b", nullptr);
+        if (sym) {
+            GHook h = GlossHook((void*)sym, (void*)hook_MotionEvent_copyFrom, (void**)&orig_MotionEvent_copyFrom);
+            if (h) LOGI("MotionEvent::copyFrom hook installed (fallback input)");
+        }
     }
 }
 
